@@ -3,7 +3,7 @@ FROM --platform=linux/arm64 debian:trixie-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl gnupg openssl xz-utils \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg xz-utils \
     && curl -s --compressed "https://packages.univrs.cloud/public.key" \
         | gpg --dearmor -o /etc/apt/trusted.gpg.d/virgo-packages.gpg \
     && curl -s --compressed -o /etc/apt/sources.list.d/virgo.list "https://packages.univrs.cloud/virgo.list" \
@@ -21,10 +21,9 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY . .
-RUN chmod 0755 /var/www/virgo-api/app/docker-entrypoint.sh
 
 VOLUME ["/data"]
 
 EXPOSE 3000
 
-CMD ["/var/www/virgo-api/app/docker-entrypoint.sh"]
+CMD ["node", "index.js"]
