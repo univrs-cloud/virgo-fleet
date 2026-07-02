@@ -2,12 +2,14 @@ import path from 'path';
 import express from 'express';
 import * as staticController from './static.js';
 import * as authController from './auth.js';
+import * as assetsController from './assets.js';
 
 const router = express.Router();
 
 router.post('/auth/signup', authController.signup);
 router.post('/auth/login', authController.login);
 router.post('/auth/logout', authController.logout);
+router.get('/assets/fleet/:nodeId/img/:type(apps|bookmarks)/:file', assetsController.serveNodeAsset);
 router.use('/', staticController.staticMiddleware);
 router.get(/.*/, (req, res, next) => {
 	// Requests under /api/ are meant for Engine.IO (or a REST route above); if they reach

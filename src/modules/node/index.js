@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { registerFleetProxy, disconnectNodeClients } from '../../utils/node_proxy.js';
+import { registerNodeSocketGetter, attachNodeAssetHandler } from '../../utils/node_assets.js';
 import eventEmitter from '../../utils/event_emitter.js';
 import * as socket from '../../socket.js';
 import DataService from '../../database/data_service.js';
@@ -18,6 +19,9 @@ class NodeModule {
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
 		registerFleetProxy(socket.getIO(), (nodeId) => {
+			return nodeSocketsByNodeId.get(nodeId);
+		});
+		registerNodeSocketGetter((nodeId) => {
 			return nodeSocketsByNodeId.get(nodeId);
 		});
 		this.#setupMiddleware();
@@ -135,6 +139,7 @@ class NodeModule {
 
 	setNodeSocket(nodeId, socket) {
 		nodeSocketsByNodeId.set(nodeId, socket);
+		attachNodeAssetHandler(socket);
 		this.#broadcastNodeStatus(nodeId, true);
 	}
 
