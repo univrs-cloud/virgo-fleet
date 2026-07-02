@@ -1,7 +1,7 @@
 import { Server } from 'socket.io';
-import { getHttpServer } from '../../socket.js';
-import { authenticateSocketUser } from '../../utils/socket_auth.js';
-import DataService from '../../database/data_service.js';
+import { getHttpServer } from '../socket.js';
+import { authenticateSocketUser } from './socket_auth.js';
+import DataService from '../database/data_service.js';
 
 const nodeProxies = new Map();
 

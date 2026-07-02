@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { ensureNodeProxy, removeNodeProxy } from './node_proxy.js';
+import { ensureNodeProxy, removeNodeProxy } from '../../utils/node_proxy.js';
 import eventEmitter from '../../utils/event_emitter.js';
 import * as socket from '../../socket.js';
 import DataService from '../../database/data_service.js';
