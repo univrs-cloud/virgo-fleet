@@ -1,10 +1,30 @@
 import { randomUUID } from 'crypto';
-import { Server } from 'socket.io';
-import { getHttpServer } from '../socket.js';
 import { authenticateSocketUser } from './socket_auth.js';
 import DataService from '../database/data_service.js';
 
-const nodeProxies = new Map();
+const clientsByNodeId = new Map();
+
+function parseFleetNamespace(name) {
+	const parts = name.split('/');
+	if (parts.length < 4 || parts[1] !== 'fleet') {
+		return null;
+	}
+	return {
+		nodeId: parts[2],
+		targetNamespace: `/${parts.slice(3).join('/')}`
+	};
+}
+
+function trackClient(nodeId, clientSocket) {
+	if (!clientsByNodeId.has(nodeId)) {
+		clientsByNodeId.set(nodeId, new Set());
+	}
+	clientsByNodeId.get(nodeId).add(clientSocket);
+}
+
+function untrackClient(nodeId, clientSocket) {
+	clientsByNodeId.get(nodeId)?.delete(clientSocket);
+}
 
 /** Every proxied client connection is multiplexed over the node's single control socket, keyed by a
  * session id. The dispatcher (attached once per node socket) routes the node's replies back to the
@@ -33,13 +53,13 @@ function ensureNodeDispatcher(nodeSocket) {
 	return sessions;
 }
 
-function bridgeClient(clientSocket, nodeSocket) {
+function bridgeClient(clientSocket, nodeSocket, nodeId, targetNamespace) {
 	const sessions = ensureNodeDispatcher(nodeSocket);
 	const sessionId = randomUUID();
-	const namespace = clientSocket.nsp.name;
 
 	sessions.set(sessionId, clientSocket);
-	nodeSocket.emit('proxy:open', { sessionId, namespace });
+	trackClient(nodeId, clientSocket);
+	nodeSocket.emit('proxy:open', { sessionId, namespace: targetNamespace });
 
 	clientSocket.onAny((event, ...args) => {
 		if (nodeSocket.connected) {
@@ -49,37 +69,31 @@ function bridgeClient(clientSocket, nodeSocket) {
 
 	clientSocket.on('disconnect', () => {
 		sessions.delete(sessionId);
+		untrackClient(nodeId, clientSocket);
 		if (nodeSocket.connected) {
 			nodeSocket.emit('proxy:close', { sessionId });
 		}
 	});
 }
 
-function ensureNodeProxy(nodeId, getNodeSocket) {
-	if (nodeProxies.has(nodeId)) {
-		return nodeProxies.get(nodeId);
-	}
+/** Registers fleet node proxy namespaces on the main Socket.IO server. Clients connect to
+ * `/fleet/{nodeId}/{module}` on path `/api` instead of separate Server instances per node. */
+function registerFleetProxy(io, getNodeSocket) {
+	const fleetNsp = io.of(/^\/fleet\/[^/]+\/.+$/);
 
-	const httpServer = getHttpServer();
-	const proxyIo = new Server(httpServer, {
-		path: `/api/fleet/${nodeId}`,
-		cors: {
-			origin: true,
-			credentials: true
+	fleetNsp.use(async (socket, next) => {
+		const parsed = parseFleetNamespace(socket.nsp.name);
+		if (!parsed) {
+			next(new Error('Invalid fleet namespace'));
+			return;
 		}
-	});
-
-	// Match any namespace: the fleet is a dumb relay, the node decides what each namespace does.
-	const proxyNamespaces = proxyIo.of(/.*/);
-
-	proxyNamespaces.use(async (socket, next) => {
 		try {
 			await authenticateSocketUser(socket);
 			if (!socket.isAuthenticated) {
 				next(new Error('Authentication required'));
 				return;
 			}
-			const allowed = await DataService.canUserAccessNode(socket.userId, nodeId);
+			const allowed = await DataService.canUserAccessNode(socket.userId, parsed.nodeId);
 			if (!allowed) {
 				next(new Error('Access denied for node'));
 				return;
@@ -90,29 +104,33 @@ function ensureNodeProxy(nodeId, getNodeSocket) {
 		}
 	});
 
-	proxyNamespaces.on('connection', (clientSocket) => {
-		const nodeSocket = getNodeSocket(nodeId);
+	fleetNsp.on('connection', (clientSocket) => {
+		const parsed = parseFleetNamespace(clientSocket.nsp.name);
+		if (!parsed) {
+			clientSocket.disconnect(true);
+			return;
+		}
+		const nodeSocket = getNodeSocket(parsed.nodeId);
 		if (!nodeSocket) {
 			clientSocket.disconnect(true);
 			return;
 		}
-		bridgeClient(clientSocket, nodeSocket);
+		bridgeClient(clientSocket, nodeSocket, parsed.nodeId, parsed.targetNamespace);
 	});
-
-	nodeProxies.set(nodeId, proxyIo);
-	return proxyIo;
 }
 
-function removeNodeProxy(nodeId) {
-	const proxy = nodeProxies.get(nodeId);
-	if (!proxy) {
+function disconnectNodeClients(nodeId) {
+	const clients = clientsByNodeId.get(nodeId);
+	if (!clients) {
 		return;
 	}
-	proxy.close();
-	nodeProxies.delete(nodeId);
+	for (const clientSocket of [...clients]) {
+		clientSocket.disconnect(true);
+	}
+	clientsByNodeId.delete(nodeId);
 }
 
 export {
-	ensureNodeProxy,
-	removeNodeProxy
+	registerFleetProxy,
+	disconnectNodeClients
 };

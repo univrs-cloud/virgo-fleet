@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { ensureNodeProxy, removeNodeProxy } from '../../utils/node_proxy.js';
+import { registerFleetProxy, disconnectNodeClients } from '../../utils/node_proxy.js';
 import eventEmitter from '../../utils/event_emitter.js';
 import * as socket from '../../socket.js';
 import DataService from '../../database/data_service.js';
@@ -17,6 +17,9 @@ class NodeModule {
 
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
+		registerFleetProxy(socket.getIO(), (nodeId) => {
+			return nodeSocketsByNodeId.get(nodeId);
+		});
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
 		setImmediate(() => {
@@ -85,7 +88,7 @@ class NodeModule {
 				const nodeId = socket.data?.nodeId;
 				if (nodeId && nodeSocketsByNodeId.get(nodeId) === socket) {
 					nodeSocketsByNodeId.delete(nodeId);
-					removeNodeProxy(nodeId);
+					disconnectNodeClients(nodeId);
 					this.#broadcastNodeStatus(nodeId, false);
 				}
 			});
@@ -132,9 +135,6 @@ class NodeModule {
 
 	setNodeSocket(nodeId, socket) {
 		nodeSocketsByNodeId.set(nodeId, socket);
-		ensureNodeProxy(nodeId, (id) => {
-			return nodeSocketsByNodeId.get(id);
-		});
 		this.#broadcastNodeStatus(nodeId, true);
 	}
 
