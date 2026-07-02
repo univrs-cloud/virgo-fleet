@@ -139,6 +139,11 @@ class NodeModule {
 		return nodeSocketsByNodeId.get(nodeId);
 	}
 
+	/** Forcibly drops a node's live connection (e.g. after it's deleted); the socket's own `disconnect` handler does the rest of the cleanup (proxy teardown, status broadcast). */
+	disconnectNode(nodeId) {
+		this.getNodeSocket(nodeId)?.disconnect(true);
+	}
+
 	setNodeSocket(nodeId, socket) {
 		nodeSocketsByNodeId.set(nodeId, socket);
 		ensureNodeProxy(nodeId, (id) => {

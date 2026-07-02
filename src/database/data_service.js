@@ -397,6 +397,19 @@ class DataService {
 		return true;
 	}
 
+	static async revokeNodeAccess({ email, nodeId }) {
+		const user = await this.getUserByEmail(email);
+		const node = await Node.findOne({ where: { nodeId } });
+		if (!user || !node) {
+			throw new Error('User or node not found.');
+		}
+		if (node.OwnerUserId === user.id) {
+			throw new Error('Node owner cannot be removed.');
+		}
+		await node.removeFleetUser(user);
+		return true;
+	}
+
 	static async grantGroupNodeAccess({ groupName, nodeId }) {
 		const group = await FleetGroup.findOne({ where: { name: groupName } });
 		const node = await Node.findOne({ where: { nodeId } });
@@ -447,6 +460,17 @@ class DataService {
 	static async isNodeOwner(userId, nodeId) {
 		const node = await Node.findOne({ where: { nodeId } });
 		return Boolean(node && node.OwnerUserId === userId);
+	}
+
+	static async deleteNode(nodeId) {
+		const node = await Node.findOne({ where: { nodeId } });
+		if (!node) {
+			throw new Error(`Node ${nodeId} not found.`);
+		}
+		await node.setFleetUsers([]);
+		await node.setFleetGroups([]);
+		await node.destroy();
+		return true;
 	}
 }
 

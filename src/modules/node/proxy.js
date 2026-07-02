@@ -93,6 +93,62 @@ const onConnection = async (socket, module) => {
 		}
 	});
 
+	socket.on('nodes:revoke', async (config, ack = () => {}) => {
+		try {
+			if (!socket.isAuthenticated) {
+				ack({ ok: false, error: 'Authentication required' });
+				return;
+			}
+			const nodeId = String(config?.nodeId || '').trim();
+			const revokeEmail = normalizeEmail(config?.email);
+			if (!nodeId || !revokeEmail) {
+				ack({ ok: false, error: 'nodeId and email are required' });
+				return;
+			}
+			const isSelf = socket.email === revokeEmail;
+			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
+			if (!owner && !socket.isAdmin && !isSelf) {
+				ack({ ok: false, error: 'Only the owner or the account itself can manage node access' });
+				return;
+			}
+			// Owner protection is also enforced in DataService.revokeNodeAccess itself, so it
+			// can't be bypassed by an admin, or by the owner trying to remove themselves.
+			await DataService.revokeNodeAccess({
+				email: revokeEmail,
+				nodeId
+			});
+			module.eventEmitter.emit('nodes:updated');
+			ack({ ok: true });
+		} catch (error) {
+			ack({ ok: false, error: error.message });
+		}
+	});
+
+	socket.on('nodes:delete', async (config, ack = () => {}) => {
+		try {
+			if (!socket.isAuthenticated) {
+				ack({ ok: false, error: 'Authentication required' });
+				return;
+			}
+			const nodeId = String(config?.nodeId || '').trim();
+			if (!nodeId) {
+				ack({ ok: false, error: 'nodeId is required' });
+				return;
+			}
+			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
+			if (!owner && !socket.isAdmin) {
+				ack({ ok: false, error: 'Only the owner can delete this node' });
+				return;
+			}
+			await DataService.deleteNode(nodeId);
+			module.disconnectNode(nodeId);
+			module.eventEmitter.emit('nodes:updated');
+			ack({ ok: true });
+		} catch (error) {
+			ack({ ok: false, error: error.message });
+		}
+	});
+
 	socket.on('group:node:add', async (config, ack = () => {}) => {
 		try {
 			if (!socket.isAuthenticated || !socket.isAdmin) {
