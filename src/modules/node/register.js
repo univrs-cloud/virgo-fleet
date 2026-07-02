@@ -46,14 +46,6 @@ const onConnection = (socket, module) => {
 			ts: Date.now()
 		});
 	});
-
-	socket.on('host:res', (payload = {}) => {
-		const requestId = String(payload.requestId || '').trim();
-		if (!requestId) {
-			return;
-		}
-		module.resolvePendingRequest(requestId, payload);
-	});
 };
 
 export default {

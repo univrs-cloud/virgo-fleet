@@ -9,12 +9,10 @@ import { authenticateSocketUser } from '../../utils/socket_auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeSocketsByNodeId = new Map();
-const pendingRequests = new Map();
 
 class NodeModule {
 	#nsp;
 	#plugins = [];
-	#interval = null;
 
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
@@ -23,9 +21,6 @@ class NodeModule {
 		setImmediate(() => {
 			this.#loadPlugins();
 		});
-		this.#interval = setInterval(() => {
-			this.#cleanupPendingRequests();
-		}, 5000);
 	}
 
 	get nsp() {
@@ -112,21 +107,6 @@ class NodeModule {
 		}
 	}
 
-	#cleanupPendingRequests() {
-		const now = Date.now();
-		for (const [requestId, entry] of pendingRequests) {
-			if ((now - entry.createdAt) > 30000) {
-				pendingRequests.delete(requestId);
-				entry.userSocket.emit('host:res', {
-					requestId,
-					nodeId: entry.nodeId,
-					ok: false,
-					error: 'Timed out waiting for node response'
-				});
-			}
-		}
-	}
-
 	#broadcastNodeStatus(nodeId, online) {
 		for (const socket of this.#nsp.sockets.values()) {
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
@@ -150,25 +130,6 @@ class NodeModule {
 			return nodeSocketsByNodeId.get(id);
 		});
 		this.#broadcastNodeStatus(nodeId, true);
-	}
-
-	addPendingRequest(requestId, entry) {
-		pendingRequests.set(requestId, entry);
-	}
-
-	resolvePendingRequest(requestId, payload) {
-		const pending = pendingRequests.get(requestId);
-		if (!pending) {
-			return;
-		}
-		pendingRequests.delete(requestId);
-		pending.userSocket.emit('host:res', {
-			requestId,
-			nodeId: pending.nodeId,
-			ok: true,
-			result: payload.result ?? null,
-			error: payload.error ?? null
-		});
 	}
 
 	isNodeOnline(nodeId) {

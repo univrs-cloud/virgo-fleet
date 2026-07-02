@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
 
@@ -191,45 +190,6 @@ const onConnection = async (socket, module) => {
 			module.eventEmitter.emit('groups:updated');
 			module.eventEmitter.emit('nodes:updated');
 			ack({ ok: true });
-		} catch (error) {
-			ack({ ok: false, error: error.message });
-		}
-	});
-
-	socket.on('host:req', async (config, ack = () => {}) => {
-		try {
-			if (!socket.isAuthenticated) {
-				ack({ ok: false, error: 'Authentication required' });
-				return;
-			}
-			const nodeId = String(config?.nodeId || '').trim();
-			if (!nodeId) {
-				ack({ ok: false, error: 'nodeId is required' });
-				return;
-			}
-			const allowed = await DataService.canUserAccessNode(socket.userId, nodeId);
-			if (!allowed) {
-				ack({ ok: false, error: 'Access denied for node' });
-				return;
-			}
-			const nodeSocket = module.getNodeSocket(nodeId);
-			if (!nodeSocket) {
-				ack({ ok: false, error: 'Node is offline' });
-				return;
-			}
-			const requestId = String(config?.requestId || randomUUID());
-			module.addPendingRequest(requestId, {
-				userSocket: socket,
-				nodeId,
-				createdAt: Date.now()
-			});
-			nodeSocket.emit('host:req', {
-				requestId,
-				nodeId,
-				action: config?.action || 'proxy',
-				data: config?.data ?? null
-			});
-			ack({ ok: true, requestId });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
 		}
