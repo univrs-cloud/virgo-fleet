@@ -6,6 +6,7 @@ import eventEmitter from '../../utils/event_emitter.js';
 import * as socket from '../../socket.js';
 import DataService from '../../database/data_service.js';
 import { authenticateSocketUser } from '../../utils/socket_auth.js';
+import { emitNodes } from './proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeSocketsByNodeId = new Map();
@@ -69,6 +70,11 @@ class NodeModule {
 		this.#nsp.on('connection', (socket) => {
 			if (socket.data?.role === 'node' && socket.data?.nodeId) {
 				this.setNodeSocket(socket.data.nodeId, socket);
+			}
+			if (socket.data?.role === 'user' && socket.isAuthenticated) {
+				emitNodes(socket, this).catch((error) => {
+					console.error('Error emitting nodes:', error);
+				});
 			}
 			this.#plugins.forEach((plugin) => {
 				if (typeof plugin.onConnection === 'function') {

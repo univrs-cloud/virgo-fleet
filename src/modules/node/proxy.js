@@ -35,33 +35,10 @@ const register = (module) => {
 	});
 };
 
-const onConnection = async (socket, module) => {
+const onConnection = (socket, module) => {
 	if (socket.data?.role === 'node') {
 		return;
 	}
-
-	await emitNodes(socket, module);
-
-	socket.on('nodes:list', async (_config, ack = () => {}) => {
-		try {
-			if (!socket.isAuthenticated) {
-				ack({ ok: false, error: 'Authentication required' });
-				return;
-			}
-			const nodes = await DataService.listAccessibleNodes(socket.userId);
-			ack({
-				ok: true,
-				nodes: nodes.map((node) => {
-					return {
-						...node,
-						online: module.isNodeOnline(node.nodeId)
-					};
-				})
-			});
-		} catch (error) {
-			ack({ ok: false, error: error.message });
-		}
-	});
 
 	socket.on('nodes:invite', async (config, ack = () => {}) => {
 		try {
@@ -194,6 +171,10 @@ const onConnection = async (socket, module) => {
 			ack({ ok: false, error: error.message });
 		}
 	});
+};
+
+export {
+	emitNodes
 };
 
 export default {
