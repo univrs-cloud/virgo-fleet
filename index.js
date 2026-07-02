@@ -13,7 +13,7 @@ async function main() {
 	await modules();
 
 	server.listen(config.server.port, () => {
-		console.log(`Server started at https://${config.server.host}:${config.server.port}`);
+		console.log(`Server started at http://${config.server.host}:${config.server.port}`);
 	});
 }
 

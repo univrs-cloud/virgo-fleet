@@ -1,6 +1,7 @@
 FROM --platform=linux/arm64 debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV VIRGO_FLEET=true
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg xz-utils \

@@ -1,23 +1,22 @@
 import * as trustedProxy from '../utils/trusted_proxy.js';
+import DataService from '../database/data_service.js';
+import {
+	buildAccountFromUser,
+	clearAuthCookies,
+	getCookieOptions,
+	getSessionTokenFromCookieHeader,
+	serializeAccount,
+	setAuthCookies
+} from '../utils/auth_cookies.js';
 
 /**
- * Middleware for non-WebSocket HTTP requests only.
- * Sets the account cookie from request headers so the UI can show who is authenticated.
- * Only sets the cookie when the request came from proxy (loopback),
- * so remote-user is not spoofed.
+ * Sets the account cookie so the UI matches virgo-api / Authelia shape.
+ * Trusted-proxy headers (Traefik + Authelia) take precedence; otherwise a
+ * valid virgo.session cookie from fleet login is used.
  */
-export default (req, res, next) => {
-	const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 184;
-	const cookieOptions = {
-		domain: req.hostname,
-		encode: String,
-		httpOnly: false,
-		secure: true,
-		sameSite: 'lax',
-		maxAge: SIX_MONTHS_MS
-	};
-	// Node’s HTTP API calls the TCP connection “socket” (not WebSocket). We need that connection’s
-	// peer address so we can tell proxy (loopback) from direct clients.
+export default async (req, res, next) => {
+	const cookieOptions = getCookieOptions(req);
+
 	if (trustedProxy.isFromTrustedProxy(req.socket?.remoteAddress) && req.headers['remote-user']) {
 		const account = {
 			name: req.headers['remote-name'],
@@ -25,12 +24,31 @@ export default (req, res, next) => {
 			email: req.headers['remote-email'],
 			groups: req.headers['remote-groups']?.split(',')
 		};
-		const serializedAccount = Buffer.from(JSON.stringify(account)).toString('base64');
-		res.cookie('account', serializedAccount, cookieOptions);
-	} else {
-		// Clear the cookie if remote-user header is not present
-		res.cookie('account', '', cookieOptions);
+		res.cookie('account', serializeAccount(account), cookieOptions);
+		res.header('Access-Control-Allow-Origin', '*');
+		next();
+		return;
 	}
+
+	const sessionToken = getSessionTokenFromCookieHeader(req.headers.cookie);
+	if (sessionToken) {
+		try {
+			const session = await DataService.getSessionByToken(sessionToken);
+			if (session?.FleetUser) {
+				setAuthCookies(res, req, {
+					token: sessionToken,
+					user: session.FleetUser
+				});
+				res.header('Access-Control-Allow-Origin', '*');
+				next();
+				return;
+			}
+		} catch (error) {
+			console.error('Failed to resolve fleet session cookie:', error);
+		}
+	}
+
+	clearAuthCookies(res, req);
 	res.header('Access-Control-Allow-Origin', '*');
 	next();
 };

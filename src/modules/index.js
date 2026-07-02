@@ -1,8 +1,17 @@
-// import createIndexerModule from './indexer/index.js';
+import DataService from '../database/data_service.js';
+import createUserModule from './user/index.js';
+import createGroupModule from './group/index.js';
+import createAuthModule from './auth/index.js';
+import createNodeModule from './node/index.js';
 
 export default async () => {
+	await DataService.initialize();
+
 	const modules = [
-		// createIndexerModule()
+		createUserModule(),
+		createGroupModule(),
+		createAuthModule(),
+		createNodeModule()
 	];
 
 	return {
