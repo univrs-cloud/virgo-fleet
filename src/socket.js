@@ -1,5 +1,4 @@
 import { Server } from 'socket.io';
-import config from '../config.js';
 
 let io = null;
 let httpServer = null;
@@ -11,15 +10,11 @@ const initializeSocket = (server) => {
 
 	httpServer = server;
 	io = new Server(server, {
-		path: config.fleet.socketPath,
+		path: '/api',
 		cors: {
 			origin: true,
 			credentials: true
 		}
-	});
-
-	io.of('/runtime').on('connection', (socket) => {
-		socket.emit('runtime', { role: 'fleet' });
 	});
 
 	return io;
