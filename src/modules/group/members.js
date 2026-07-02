@@ -4,7 +4,12 @@ import { normalizeEmail } from '../../utils/email.js';
 const onConnection = (socket, module) => {
 	socket.on('group:user:add', async (config, ack = () => {}) => {
 		try {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
+			if (!socket.isAuthenticated) {
+				return;
+			}
+			const groupName = config.groupName || config.name;
+			if (!await DataService.isGroupAdmin(socket.userId, groupName)) {
+				ack({ ok: false, error: 'Only a group admin can add users to this group' });
 				return;
 			}
 			const email = normalizeEmail(config.email);
@@ -27,7 +32,12 @@ const onConnection = (socket, module) => {
 
 	socket.on('group:user:remove', async (config, ack = () => {}) => {
 		try {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
+			if (!socket.isAuthenticated) {
+				return;
+			}
+			const groupName = config.groupName || config.name;
+			if (!await DataService.isGroupAdmin(socket.userId, groupName)) {
+				ack({ ok: false, error: 'Only a group admin can remove users from this group' });
 				return;
 			}
 			const email = normalizeEmail(config.email);

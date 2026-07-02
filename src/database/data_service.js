@@ -16,7 +16,6 @@ import { normalizeEmail } from '../utils/email.js';
 
 const PASSWORD_COST = 12;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
-const DEFAULT_ADMIN_EMAIL = 'admin@local';
 
 function toPublicUser(user) {
 	if (!user) {
@@ -27,7 +26,6 @@ function toPublicUser(user) {
 		id: plain.id,
 		email: plain.email,
 		displayName: plain.displayName,
-		isAdmin: plain.isAdmin,
 		isDisabled: plain.isDisabled,
 		groups: plain.FleetGroups?.map((group) => {
 			return {
@@ -42,16 +40,6 @@ function toPublicUser(user) {
 class DataService {
 	static async initialize() {
 		await sequelize.sync();
-		const userCount = await FleetUser.count();
-		if (userCount === 0) {
-			const passwordHash = bcrypt.hashSync('admin', PASSWORD_COST);
-			await FleetUser.create({
-				displayName: 'Administrator',
-				email: DEFAULT_ADMIN_EMAIL,
-				passwordHash,
-				isAdmin: true
-			});
-		}
 		return true;
 	}
 
@@ -100,7 +88,7 @@ class DataService {
 		});
 	}
 
-	static async createUser({ email, displayName, password, isAdmin = false }) {
+	static async createUser({ email, displayName, password }) {
 		const normalizedEmail = normalizeEmail(email);
 		if (!normalizedEmail || !password) {
 			throw new Error('email and password are required');
@@ -112,22 +100,18 @@ class DataService {
 		const user = await FleetUser.create({
 			email: normalizedEmail,
 			displayName: displayName || normalizedEmail,
-			passwordHash: bcrypt.hashSync(password, PASSWORD_COST),
-			isAdmin: Boolean(isAdmin)
+			passwordHash: bcrypt.hashSync(password, PASSWORD_COST)
 		});
 		return toPublicUser(user);
 	}
 
-	static async updateUser({ email, displayName, isAdmin }) {
+	static async updateUser({ email, displayName }) {
 		const user = await this.getUserByEmail(email);
 		if (!user) {
 			throw new Error(`User ${email} not found.`);
 		}
 		if (displayName !== undefined) {
 			user.displayName = displayName;
-		}
-		if (isAdmin !== undefined) {
-			user.isAdmin = Boolean(isAdmin);
 		}
 		await user.save();
 		return toPublicUser(user);
@@ -137,9 +121,6 @@ class DataService {
 		const user = await this.getUserByEmail(email);
 		if (!user) {
 			throw new Error(`User ${email} not found.`);
-		}
-		if (user.email === DEFAULT_ADMIN_EMAIL) {
-			throw new Error('Owner cannot be deleted.');
 		}
 		await FleetSession.destroy({ where: { FleetUserId: user.id } });
 		await user.destroy();
@@ -200,12 +181,10 @@ class DataService {
 	}
 
 	static async signup({ email, displayName, password }) {
-		const userCount = await FleetUser.count();
 		const user = await this.createUser({
 			email,
 			displayName,
-			password,
-			isAdmin: userCount === 0
+			password
 		});
 		const dbUser = await this.getUserByEmail(user.email);
 		const session = await this.createSession(dbUser.id);
@@ -253,7 +232,7 @@ class DataService {
 		});
 	}
 
-	static async createGroup({ name, description }) {
+	static async createGroup({ name, description, createdByUserId }) {
 		const normalizedName = String(name || '').trim();
 		if (!normalizedName) {
 			throw new Error('Group name is required.');
@@ -262,10 +241,32 @@ class DataService {
 		if (existing) {
 			throw new Error('Group already exists.');
 		}
-		return FleetGroup.create({
+		const group = await FleetGroup.create({
 			name: normalizedName,
 			description: description || null
 		});
+		if (createdByUserId) {
+			const creator = await FleetUser.findByPk(createdByUserId);
+			if (creator) {
+				await group.addFleetUser(creator, { through: { role: 'admin' } });
+			}
+		}
+		return group;
+	}
+
+	/** Group management (update/delete/invite/membership) is restricted to members with the 'admin' role on that specific group, since there is no global admin. */
+	static async isGroupAdmin(userId, groupName) {
+		if (!userId || !groupName) {
+			return false;
+		}
+		const group = await FleetGroup.findOne({ where: { name: groupName } });
+		if (!group) {
+			return false;
+		}
+		const membership = await FleetUserGroup.findOne({
+			where: { FleetUserId: userId, FleetGroupId: group.id }
+		});
+		return membership?.role === 'admin';
 	}
 
 	static async updateGroup({ name, description, newName }) {
@@ -436,16 +437,21 @@ class DataService {
 				nodeId: node.nodeId,
 				name: node.name,
 				lastSeenAt: node.lastSeenAt,
-				access: 'direct'
+				access: 'direct',
+				isOwner: node.OwnerUserId === userId
 			});
 		}
 		for (const group of user.FleetGroups || []) {
 			for (const node of group.Nodes || []) {
+				if (nodes.has(node.nodeId)) {
+					continue;
+				}
 				nodes.set(node.nodeId, {
 					nodeId: node.nodeId,
 					name: node.name,
 					lastSeenAt: node.lastSeenAt,
-					access: `group:${group.name}`
+					access: `group:${group.name}`,
+					isOwner: node.OwnerUserId === userId
 				});
 			}
 		}
@@ -460,6 +466,40 @@ class DataService {
 	static async isNodeOwner(userId, nodeId) {
 		const node = await Node.findOne({ where: { nodeId } });
 		return Boolean(node && node.OwnerUserId === userId);
+	}
+
+	static async listNodeMembers(nodeId) {
+		const node = await Node.findOne({
+			where: { nodeId },
+			include: [
+				{
+					model: FleetUser,
+					through: { attributes: ['role'] }
+				},
+				{
+					model: FleetGroup,
+					attributes: ['id', 'name']
+				}
+			]
+		});
+		if (!node) {
+			throw new Error(`Node ${nodeId} not found.`);
+		}
+		const plain = node.get({ plain: true });
+		return {
+			nodeId: plain.nodeId,
+			name: plain.name,
+			users: (plain.FleetUsers || []).map((user) => {
+				return {
+					email: user.email,
+					displayName: user.displayName,
+					role: user.NodeAccess?.role || 'invited'
+				};
+			}),
+			groups: (plain.FleetGroups || []).map((group) => {
+				return { name: group.name };
+			})
+		};
 	}
 
 	static async deleteNode(nodeId) {

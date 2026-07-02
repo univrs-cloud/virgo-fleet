@@ -1,6 +1,20 @@
 import DataService from '../database/data_service.js';
 import { clearAuthCookies, getSessionTokenFromCookieHeader, setAuthCookies } from '../utils/auth_cookies.js';
 
+async function signup(req, res) {
+	try {
+		const result = await DataService.signup({
+			email: req.body?.email,
+			displayName: req.body?.displayName,
+			password: req.body?.password
+		});
+		setAuthCookies(res, req, { token: result.token, user: result.user });
+		res.json({ ok: true });
+	} catch (error) {
+		res.status(400).json({ ok: false, error: error.message });
+	}
+}
+
 async function login(req, res) {
 	try {
 		const result = await DataService.login({
@@ -28,6 +42,7 @@ async function logout(req, res) {
 }
 
 export {
+	signup,
 	login,
 	logout
 };

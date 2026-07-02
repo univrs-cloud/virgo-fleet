@@ -20,11 +20,6 @@ const FleetUser = sequelize.define('FleetUser', {
 		type: DataTypes.STRING,
 		allowNull: false
 	},
-	isAdmin: {
-		type: DataTypes.BOOLEAN,
-		allowNull: false,
-		defaultValue: false
-	},
 	isDisabled: {
 		type: DataTypes.BOOLEAN,
 		allowNull: false,

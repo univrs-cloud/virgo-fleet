@@ -77,7 +77,7 @@ const onConnection = async (socket, module) => {
 				return;
 			}
 			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
-			if (!owner && !socket.isAdmin) {
+			if (!owner) {
 				ack({ ok: false, error: 'Only owner can invite users' });
 				return;
 			}
@@ -88,6 +88,29 @@ const onConnection = async (socket, module) => {
 			});
 			module.eventEmitter.emit('nodes:updated');
 			ack({ ok: true });
+		} catch (error) {
+			ack({ ok: false, error: error.message });
+		}
+	});
+
+	socket.on('nodes:members', async (config, ack = () => {}) => {
+		try {
+			if (!socket.isAuthenticated) {
+				ack({ ok: false, error: 'Authentication required' });
+				return;
+			}
+			const nodeId = String(config?.nodeId || '').trim();
+			if (!nodeId) {
+				ack({ ok: false, error: 'nodeId is required' });
+				return;
+			}
+			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
+			if (!owner) {
+				ack({ ok: false, error: 'Only the owner can manage node access' });
+				return;
+			}
+			const members = await DataService.listNodeMembers(nodeId);
+			ack({ ok: true, ...members });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
 		}
@@ -107,12 +130,12 @@ const onConnection = async (socket, module) => {
 			}
 			const isSelf = socket.email === revokeEmail;
 			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
-			if (!owner && !socket.isAdmin && !isSelf) {
+			if (!owner && !isSelf) {
 				ack({ ok: false, error: 'Only the owner or the account itself can manage node access' });
 				return;
 			}
 			// Owner protection is also enforced in DataService.revokeNodeAccess itself, so it
-			// can't be bypassed by an admin, or by the owner trying to remove themselves.
+			// can't be bypassed by the owner trying to remove themselves.
 			await DataService.revokeNodeAccess({
 				email: revokeEmail,
 				nodeId
@@ -136,7 +159,7 @@ const onConnection = async (socket, module) => {
 				return;
 			}
 			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
-			if (!owner && !socket.isAdmin) {
+			if (!owner) {
 				ack({ ok: false, error: 'Only the owner can delete this node' });
 				return;
 			}
@@ -151,7 +174,14 @@ const onConnection = async (socket, module) => {
 
 	socket.on('group:node:add', async (config, ack = () => {}) => {
 		try {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
+			if (!socket.isAuthenticated) {
+				return;
+			}
+			const groupName = config.groupName || config.name;
+			const owner = await DataService.isNodeOwner(socket.userId, config.nodeId);
+			const groupAdmin = await DataService.isGroupAdmin(socket.userId, groupName);
+			if (!owner || !groupAdmin) {
+				ack({ ok: false, error: 'Only the node owner and a group admin can share a node with a group' });
 				return;
 			}
 			await DataService.grantGroupNodeAccess({

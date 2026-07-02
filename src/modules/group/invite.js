@@ -3,7 +3,12 @@ import DataService from '../../database/data_service.js';
 const onConnection = (socket, module) => {
 	socket.on('group:invite', async (config, ack = () => {}) => {
 		try {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
+			if (!socket.isAuthenticated) {
+				return;
+			}
+			const groupName = config.groupName || config.name;
+			if (!await DataService.isGroupAdmin(socket.userId, groupName)) {
+				ack({ ok: false, error: 'Only a group admin can invite users' });
 				return;
 			}
 			const invite = await DataService.createGroupInvite({

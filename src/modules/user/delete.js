@@ -1,7 +1,7 @@
 import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
 
-const deleteUser = async (config, module) => {
+const deleteUser = async (config, socket, module) => {
 	const email = normalizeEmail(config.email);
 	if (!email) {
 		throw new Error('email is required');
@@ -12,6 +12,9 @@ const deleteUser = async (config, module) => {
 	if (!user) {
 		throw new Error(`User ${email} not found.`);
 	}
+	if (socket.email !== email) {
+		throw new Error('Not allowed to delete this user.');
+	}
 	await DataService.deleteUser(email);
 	module.eventEmitter.emit('users:updated');
 	return `User ${email} deleted.`;
@@ -20,10 +23,10 @@ const deleteUser = async (config, module) => {
 const onConnection = (socket, module) => {
 	socket.on('user:delete', async (config, ack = () => {}) => {
 		try {
-			if (!socket.isAuthenticated || !socket.isAdmin) {
+			if (!socket.isAuthenticated) {
 				return;
 			}
-			const message = await deleteUser(config, module);
+			const message = await deleteUser(config, socket, module);
 			ack({ ok: true, message });
 		} catch (error) {
 			ack({ ok: false, error: error.message });

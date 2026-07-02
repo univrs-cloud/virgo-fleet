@@ -12,7 +12,7 @@ const changePassword = async (config, socket, module) => {
 	if (!user) {
 		throw new Error(`User ${email} not found.`);
 	}
-	if (!socket.isAdmin && socket.email !== email) {
+	if (socket.email !== email) {
 		throw new Error('Not allowed to change this password.');
 	}
 	await DataService.changePassword(email, config.password);

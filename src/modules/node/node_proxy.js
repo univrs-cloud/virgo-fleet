@@ -1,5 +1,7 @@
 import { Server } from 'socket.io';
 import { getHttpServer } from '../../socket.js';
+import { authenticateSocketUser } from '../../utils/socket_auth.js';
+import DataService from '../../database/data_service.js';
 
 const nodeProxies = new Map();
 
@@ -34,6 +36,23 @@ function ensureNodeProxy(nodeId, getNodeSocket) {
 	});
 
 	const hostNsp = proxyIo.of('/host');
+	hostNsp.use(async (socket, next) => {
+		try {
+			await authenticateSocketUser(socket);
+			if (!socket.isAuthenticated) {
+				next(new Error('Authentication required'));
+				return;
+			}
+			const allowed = await DataService.canUserAccessNode(socket.userId, nodeId);
+			if (!allowed) {
+				next(new Error('Access denied for node'));
+				return;
+			}
+			next();
+		} catch (error) {
+			next(error);
+		}
+	});
 	hostNsp.on('connection', (clientSocket) => {
 		const nodeSocket = getNodeSocket(nodeId);
 		if (!nodeSocket) {

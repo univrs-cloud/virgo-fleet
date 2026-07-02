@@ -11,7 +11,6 @@ async function applyFleetUserSession(socket, sessionToken) {
 		return false;
 	}
 	socket.isAuthenticated = true;
-	socket.isAdmin = Boolean(session.FleetUser.isAdmin);
 	socket.email = session.FleetUser.email;
 	socket.userId = session.FleetUser.id;
 	return true;
@@ -27,14 +26,12 @@ async function authenticateSocketUser(socket) {
 	if (remoteUser) {
 		const user = await DataService.getUserByEmail(remoteUser);
 		socket.isAuthenticated = true;
-		socket.isAdmin = Boolean(user?.isAdmin) || socket.handshake.headers['remote-groups']?.split(',')?.includes('admins') || false;
 		socket.email = user?.email || remoteUser;
 		socket.userId = user?.id || null;
 		return true;
 	}
 
 	socket.isAuthenticated = false;
-	socket.isAdmin = false;
 	socket.email = 'guest';
 	socket.userId = null;
 	return false;

@@ -24,12 +24,17 @@ function getCookieOptions(req) {
 	};
 }
 
+/**
+ * There is no fleet-wide admin role; fleet accounts never carry the 'admins' group.
+ * Access to a node's own system pages (in fleet mode) is instead granted per-node
+ * based on node access, not on this cookie.
+ */
 function buildAccountFromUser(user) {
 	return {
 		name: user.displayName || user.email,
 		user: user.email,
 		email: user.email,
-		groups: user.isAdmin ? ['admins'] : ['users']
+		groups: ['users']
 	};
 }
 

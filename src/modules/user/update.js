@@ -12,16 +12,12 @@ const updateUser = async (config, socket, module) => {
 	if (!user) {
 		throw new Error(`User ${email} not found.`);
 	}
-	if (!socket.isAdmin && socket.email !== email) {
+	if (socket.email !== email) {
 		throw new Error('Not allowed to update this user.');
-	}
-	if (!socket.isAdmin && config.role === 'admin') {
-		config.role = '';
 	}
 	await DataService.updateUser({
 		email,
-		displayName: config.fullname || config.displayName,
-		isAdmin: socket.isAdmin ? config.role === 'admin' : undefined
+		displayName: config.fullname || config.displayName
 	});
 	module.eventEmitter.emit('users:updated');
 	return `User ${email} updated.`;
