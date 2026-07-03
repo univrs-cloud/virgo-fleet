@@ -6,7 +6,7 @@ class RuntimeModule extends BaseModule {
 	}
 
 	onConnection(socket) {
-		socket.emit('runtime', { role: 'fleet' });
+		socket.emit('role', 'fleet');
 	}
 }
 
