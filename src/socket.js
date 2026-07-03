@@ -1,14 +1,12 @@
 import { Server } from 'socket.io';
 
 let io = null;
-let httpServer = null;
 
 const initializeSocket = (server) => {
 	if (io) {
 		throw new Error('Socket.IO already initialized');
 	}
-
-	httpServer = server;
+	
 	io = new Server(server, {
 		path: '/api',
 		cors: {
@@ -27,15 +25,7 @@ const getIO = () => {
 	return io;
 };
 
-const getHttpServer = () => {
-	if (!httpServer) {
-		throw new Error('HTTP server not initialized. Call initializeSocket first.');
-	}
-	return httpServer;
-};
-
 export {
 	initializeSocket,
-	getIO,
-	getHttpServer
+	getIO
 };
