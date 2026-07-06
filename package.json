@@ -1,35 +1,38 @@
 {
-  "name": "virgo-fleet",
-  "version": "1.0.0",
-  "description": "virgo Fleet",
-  "author": "univrs",
-  "license": "UNLICENSED",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "engines": {
-    "node": ">=24.13.0",
-    "npm": ">=11.6.2"
-  },
-  "type": "module",
-  "cpu": [
-    "arm64"
-  ],
-  "dependencies": {
-    "bcryptjs": "^3.0.3",
-    "dotenv": "^17.4.2",
-    "execa": "^9.6.1",
-    "express": "^5.2.1",
-    "express-rate-limit": "^8.5.2",
-    "express-validator": "^7.3.2",
-    "sequelize": "^6.37.8",
-    "socket.io": "^4.8.3",
-    "sqlite3": "^6.0.1"
-  },
-  "overrides": {
+	"name": "virgo-fleet",
+	"version": "1.0.0",
+	"description": "virgo Fleet",
+	"author": "univrs",
+	"license": "UNLICENSED",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"engines": {
+		"node": ">=24.13.0",
+		"npm": ">=11.6.2"
+	},
+	"type": "module",
+	"cpu": [
+		"arm64"
+	],
+	"dependencies": {
+		"bcryptjs": "^3.0.3",
+		"dotenv": "^17.4.2",
+		"execa": "^9.6.1",
+		"express": "^5.2.1",
+		"express-rate-limit": "^8.5.2",
+		"express-validator": "^7.3.2",
+		"sequelize": "^6.37.8",
+		"socket.io": "^4.8.3",
+		"sqlite3": "^6.0.1"
+	},
+	"overrides": {
 		"glob": "^13.0.0",
 		"node-gyp": "^12.1.0",
 		"validator": "^13.15.23"
+	},
+	"allowScripts": {
+		"sqlite3@6.0.1": true
 	}
 }
