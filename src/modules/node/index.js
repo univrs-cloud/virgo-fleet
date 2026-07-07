@@ -77,6 +77,9 @@ class NodeModule {
 		this.#nsp.on('connection', (socket) => {
 			if (socket.data?.role === 'node' && socket.data?.nodeId) {
 				this.setNodeSocket(socket.data.nodeId, socket);
+				DataService.touchNodeLastSeen(socket.data.nodeId).then(() => {
+					this.eventEmitter.emit('nodes:updated');
+				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
 				emitNodes(socket, this).catch((error) => {
@@ -94,6 +97,9 @@ class NodeModule {
 					nodeSocketsByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					this.#broadcastNodeStatus(nodeId, false);
+					DataService.touchNodeLastSeen(nodeId).then(() => {
+						this.eventEmitter.emit('nodes:updated');
+					});
 				}
 			});
 		});

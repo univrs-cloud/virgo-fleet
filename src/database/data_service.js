@@ -388,6 +388,18 @@ class DataService {
 		return Node.findOne({ where: { token: normalizedToken } });
 	}
 
+	static async touchNodeLastSeen(nodeId) {
+		const normalizedNodeId = String(nodeId || '').trim();
+		if (!normalizedNodeId) {
+			return;
+		}
+		try {
+			await Node.update({ lastSeenAt: new Date() }, { where: { nodeId: normalizedNodeId } });
+		} catch (error) {
+			console.error(`Error updating lastSeenAt for node '${normalizedNodeId}':`, error);
+		}
+	}
+
 	static async grantNodeAccess({ email, nodeId, role = 'invited' }) {
 		const user = await this.getUserByEmail(email);
 		const node = await Node.findOne({ where: { nodeId } });
