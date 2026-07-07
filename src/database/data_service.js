@@ -122,7 +122,7 @@ class DataService {
 		if (!user) {
 			throw new Error(`User ${email} not found.`);
 		}
-		await FleetSession.destroy({ where: { FleetUserId: user.id } });
+		await FleetSession.destroy({ where: { fleetUserId: user.id } });
 		await user.destroy();
 		return true;
 	}
@@ -143,7 +143,7 @@ class DataService {
 		await FleetSession.create({
 			token,
 			expiresAt,
-			FleetUserId: userId
+			fleetUserId: userId
 		});
 		return { token, expiresAt };
 	}
@@ -264,7 +264,7 @@ class DataService {
 			return false;
 		}
 		const membership = await FleetUserGroup.findOne({
-			where: { FleetUserId: userId, FleetGroupId: group.id }
+			where: { fleetUserId: userId, fleetGroupId: group.id }
 		});
 		return membership?.role === 'admin';
 	}
@@ -289,7 +289,7 @@ class DataService {
 		if (!group) {
 			throw new Error(`Group ${name} not found.`);
 		}
-		await GroupInvite.destroy({ where: { FleetGroupId: group.id } });
+		await GroupInvite.destroy({ where: { fleetGroupId: group.id } });
 		await group.destroy();
 		return true;
 	}
@@ -321,8 +321,8 @@ class DataService {
 		}
 		const normalizedEmail = normalizeEmail(email);
 		const invite = await GroupInvite.create({
-			FleetGroupId: group.id,
-			InvitedByUserId: invitedByUserId,
+			fleetGroupId: group.id,
+			invitedByUserId: invitedByUserId,
 			email: normalizedEmail || null,
 			token: randomUUID(),
 			status: 'pending',
@@ -364,14 +364,14 @@ class DataService {
 				nodeId: normalizedNodeId,
 				name: name || normalizedNodeId,
 				lastSeenAt: new Date(),
-				OwnerUserId: ownerUserId || null,
+				ownerUserId: ownerUserId || null,
 				token: randomBytes(32).toString('hex')
 			}
 		});
 		node.name = name || node.name;
 		node.lastSeenAt = new Date();
 		if (ownerUserId) {
-			node.OwnerUserId = ownerUserId;
+			node.ownerUserId = ownerUserId;
 		}
 		if (!node.token) {
 			node.token = randomBytes(32).toString('hex');
@@ -404,7 +404,7 @@ class DataService {
 		if (!user || !node) {
 			throw new Error('User or node not found.');
 		}
-		if (node.OwnerUserId === user.id) {
+		if (node.ownerUserId === user.id) {
 			throw new Error('Node owner cannot be removed.');
 		}
 		await node.removeFleetUser(user);
@@ -438,7 +438,7 @@ class DataService {
 				name: node.name,
 				lastSeenAt: node.lastSeenAt,
 				access: 'direct',
-				isOwner: node.OwnerUserId === userId
+				isOwner: node.ownerUserId === userId
 			});
 		}
 		for (const group of user.FleetGroups || []) {
@@ -451,7 +451,7 @@ class DataService {
 					name: node.name,
 					lastSeenAt: node.lastSeenAt,
 					access: `group:${group.name}`,
-					isOwner: node.OwnerUserId === userId
+					isOwner: node.ownerUserId === userId
 				});
 			}
 		}
@@ -465,7 +465,7 @@ class DataService {
 
 	static async isNodeOwner(userId, nodeId) {
 		const node = await Node.findOne({ where: { nodeId } });
-		return Boolean(node && node.OwnerUserId === userId);
+		return Boolean(node && node.ownerUserId === userId);
 	}
 
 	static async listNodeMembers(nodeId) {

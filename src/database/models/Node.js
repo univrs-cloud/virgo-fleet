@@ -25,7 +25,7 @@ const Node = sequelize.define('Node', {
 		allowNull: true,
 		unique: true
 	},
-	OwnerUserId: {
+	ownerUserId: {
 		type: DataTypes.INTEGER,
 		allowNull: true
 	}

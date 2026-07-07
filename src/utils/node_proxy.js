@@ -59,7 +59,12 @@ function bridgeClient(clientSocket, nodeSocket, nodeId, targetNamespace) {
 
 	sessions.set(sessionId, clientSocket);
 	trackClient(nodeId, clientSocket);
-	nodeSocket.emit('proxy:open', { sessionId, namespace: targetNamespace });
+	const user = {
+		id: clientSocket.userId,
+		email: clientSocket.email,
+		groups: ['admins']
+	};
+	nodeSocket.emit('proxy:open', { sessionId, namespace: targetNamespace, user });
 
 	clientSocket.onAny((event, ...args) => {
 		if (nodeSocket.connected) {

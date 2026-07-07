@@ -30,25 +30,25 @@ const GroupNodeAccess = sequelize.define('GroupNodeAccess', {}, {
 	tableName: 'group_node_accesses'
 });
 
-FleetUser.belongsToMany(FleetGroup, { through: FleetUserGroup });
-FleetGroup.belongsToMany(FleetUser, { through: FleetUserGroup });
+FleetUser.belongsToMany(FleetGroup, { through: FleetUserGroup, foreignKey: 'fleetUserId', otherKey: 'fleetGroupId' });
+FleetGroup.belongsToMany(FleetUser, { through: FleetUserGroup, foreignKey: 'fleetGroupId', otherKey: 'fleetUserId' });
 
-FleetUser.hasMany(FleetSession);
-FleetSession.belongsTo(FleetUser);
+FleetUser.hasMany(FleetSession, { foreignKey: 'fleetUserId' });
+FleetSession.belongsTo(FleetUser, { foreignKey: 'fleetUserId' });
 
-FleetUser.belongsToMany(Node, { through: NodeAccess });
-Node.belongsToMany(FleetUser, { through: NodeAccess });
+FleetUser.belongsToMany(Node, { through: NodeAccess, foreignKey: 'fleetUserId', otherKey: 'nodeId' });
+Node.belongsToMany(FleetUser, { through: NodeAccess, foreignKey: 'nodeId', otherKey: 'fleetUserId' });
 
-FleetGroup.belongsToMany(Node, { through: GroupNodeAccess });
-Node.belongsToMany(FleetGroup, { through: GroupNodeAccess });
+FleetGroup.belongsToMany(Node, { through: GroupNodeAccess, foreignKey: 'fleetGroupId', otherKey: 'nodeId' });
+Node.belongsToMany(FleetGroup, { through: GroupNodeAccess, foreignKey: 'nodeId', otherKey: 'fleetGroupId' });
 
-FleetGroup.hasMany(GroupInvite);
-GroupInvite.belongsTo(FleetGroup);
-FleetUser.hasMany(GroupInvite, { as: 'sentInvites', foreignKey: 'InvitedByUserId' });
-GroupInvite.belongsTo(FleetUser, { as: 'invitedBy', foreignKey: 'InvitedByUserId' });
+FleetGroup.hasMany(GroupInvite, { foreignKey: 'fleetGroupId' });
+GroupInvite.belongsTo(FleetGroup, { foreignKey: 'fleetGroupId' });
+FleetUser.hasMany(GroupInvite, { as: 'sentInvites', foreignKey: 'invitedByUserId' });
+GroupInvite.belongsTo(FleetUser, { as: 'invitedBy', foreignKey: 'invitedByUserId' });
 
-Node.belongsTo(FleetUser, { as: 'owner', foreignKey: 'OwnerUserId' });
-FleetUser.hasMany(Node, { as: 'ownedNodes', foreignKey: 'OwnerUserId' });
+Node.belongsTo(FleetUser, { as: 'owner', foreignKey: 'ownerUserId' });
+FleetUser.hasMany(Node, { as: 'ownedNodes', foreignKey: 'ownerUserId' });
 
 export {
 	FleetUser,

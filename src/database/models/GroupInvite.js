@@ -25,7 +25,7 @@ const GroupInvite = sequelize.define('GroupInvite', {
 		type: DataTypes.DATE,
 		allowNull: false
 	},
-	InvitedByUserId: {
+	invitedByUserId: {
 		type: DataTypes.INTEGER,
 		allowNull: true
 	}
