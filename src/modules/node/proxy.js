@@ -7,7 +7,7 @@ const emitNodes = async (socket, module) => {
 			return;
 		}
 		const nodes = await DataService.listAccessibleNodes(socket.userId);
-		socket.emit('nodes', nodes.map((node) => {
+		socket.emit('node:inventory', nodes.map((node) => {
 			return {
 				...node,
 				online: module.isNodeOnline(node.nodeId)
