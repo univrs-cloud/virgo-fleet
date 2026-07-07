@@ -123,7 +123,7 @@ class NodeModule {
 	#broadcastNodeStatus(nodeId, online) {
 		for (const socket of this.#nsp.sockets.values()) {
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
-				socket.emit('nodes:status', { nodeId, online });
+				socket.emit('node:status', { nodeId, online });
 			}
 		}
 	}

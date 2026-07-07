@@ -40,7 +40,7 @@ const onConnection = (socket, module) => {
 		return;
 	}
 
-	socket.on('nodes:invite', async (config, ack = () => {}) => {
+	socket.on('node:invite', async (config, ack = () => {}) => {
 		try {
 			if (!socket.isAuthenticated) {
 				ack({ ok: false, error: 'Authentication required' });
@@ -69,7 +69,7 @@ const onConnection = (socket, module) => {
 		}
 	});
 
-	socket.on('nodes:members', async (config, ack = () => {}) => {
+	socket.on('node:members', async (config, ack = () => {}) => {
 		try {
 			if (!socket.isAuthenticated) {
 				ack({ ok: false, error: 'Authentication required' });
@@ -92,7 +92,7 @@ const onConnection = (socket, module) => {
 		}
 	});
 
-	socket.on('nodes:revoke', async (config, ack = () => {}) => {
+	socket.on('node:revoke', async (config, ack = () => {}) => {
 		try {
 			if (!socket.isAuthenticated) {
 				ack({ ok: false, error: 'Authentication required' });
@@ -123,7 +123,7 @@ const onConnection = (socket, module) => {
 		}
 	});
 
-	socket.on('nodes:delete', async (config, ack = () => {}) => {
+	socket.on('node:delete', async (config, ack = () => {}) => {
 		try {
 			if (!socket.isAuthenticated) {
 				ack({ ok: false, error: 'Authentication required' });
