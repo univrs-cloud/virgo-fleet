@@ -20,7 +20,7 @@ function handleAssetResponse({ requestId, status, contentType, body, error } = {
 	pendingAssetRequests.delete(requestId);
 
 	if (error || !status || status >= 400) {
-		pending.reject(Object.assign(new Error(error || `Asset fetch failed (${status || 'unknown'})'), { status: status || 404 }));
+		pending.reject(Object.assign(new Error(error || `Asset fetch failed (${status || 'unknown'})`), { status: status || 404 }));
 		return;
 	}
 
