@@ -1,6 +1,6 @@
 import DataService from '../database/data_service.js';
 import { getSessionTokenFromCookieHeader } from '../utils/auth_cookies.js';
-import { fetchNodeAsset } from '../utils/node_assets.js';
+import { fetchNodeAsset, streamNodeAsset } from '../utils/node_assets.js';
 
 const resolveFleetUser = async (req) => {
 	const sessionToken = getSessionTokenFromCookieHeader(req.headers.cookie);
@@ -58,22 +58,42 @@ const serveNodeContent = async (req, res, next) => {
 		const rawPath = rest ? `/${rest}` : '/';
 		const targetPath = isDocumentPath(rawPath) ? '/index.html' : rawPath;
 
-		const { status, contentType, body } = await fetchNodeAsset(nodeId, targetPath);
-		res.status(status);
+		if (isDocumentPath(rawPath)) {
+			const { status, contentType, body } = await fetchNodeAsset(nodeId, targetPath);
+			if (status >= 400) {
+				res.status(status).end();
+				return;
+			}
 
-		if (isDocumentPath(rawPath) && contentType?.startsWith('text/html')) {
-			res.set('Content-Type', 'text/html; charset=utf-8');
+			if (contentType?.startsWith('text/html')) {
+				res.status(status);
+				res.set('Content-Type', 'text/html; charset=utf-8');
+				res.set('Cache-Control', 'no-store');
+				res.send(injectNodeContext(body.toString('utf8'), nodeId));
+				return;
+			}
+
+			res.status(status);
+			if (contentType) {
+				res.set('Content-Type', contentType);
+			}
 			res.set('Cache-Control', 'no-store');
-			res.send(injectNodeContext(body.toString('utf8'), nodeId));
+			res.send(body);
 			return;
 		}
 
-		res.set('Content-Type', contentType);
-		res.set('Cache-Control', 'private, max-age=3600');
-		res.send(body);
+		await streamNodeAsset(nodeId, targetPath, res, {
+			cacheControl: 'private, max-age=3600'
+		});
 	} catch (error) {
 		if (error.status) {
-			res.status(error.status).end();
+			if (!res.headersSent) {
+				res.status(error.status).end();
+				return;
+			}
+			if (!res.writableEnded) {
+				res.destroy();
+			}
 			return;
 		}
 		next(error);

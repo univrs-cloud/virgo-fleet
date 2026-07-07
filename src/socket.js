@@ -9,6 +9,7 @@ const initializeSocket = (server) => {
 	
 	io = new Server(server, {
 		path: '/api',
+		maxHttpBufferSize: 4 * 1024 * 1024,
 		cors: {
 			origin: true,
 			credentials: true
