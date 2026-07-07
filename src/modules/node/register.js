@@ -38,14 +38,6 @@ const onConnection = (socket, module) => {
 			ack({ ok: false, error: error.message });
 		}
 	});
-
-	socket.on('node:heartbeat', (_config, ack = () => {}) => {
-		ack({
-			ok: true,
-			nodeId: socket.data.nodeId || null,
-			ts: Date.now()
-		});
-	});
 };
 
 export default {
