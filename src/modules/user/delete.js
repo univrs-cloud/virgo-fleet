@@ -15,8 +15,14 @@ const deleteUser = async (config, socket, module) => {
 	if (socket.email !== email) {
 		throw new Error('Not allowed to delete this user.');
 	}
+	// Capture the user's owned nodes before deletion (afterwards ownerUserId is nulled), then hand
+	// them to the node module to unregister + delete so no orphaned nodes are left behind.
+	const ownedNodeIds = await DataService.listNodesOwnedBy(socket.userId);
 	await DataService.deleteUser(email);
 	module.eventEmitter.emit('users:updated');
+	if (ownedNodeIds.length) {
+		module.eventEmitter.emit('nodes:owner:removed', { nodeIds: ownedNodeIds });
+	}
 	return `User ${email} deleted.`;
 };
 

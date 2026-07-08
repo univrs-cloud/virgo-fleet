@@ -1,4 +1,6 @@
-const SIX_MONTHS_MS = 1000 * 60 * 60 * 24 * 184;
+// Keep in sync with DataService's SESSION_TTL_MS so the cookie and the server-side session
+// expire together (both 30 days).
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const SESSION_COOKIE = 'virgo.session';
 
 function parseCookieHeader(cookieHeader, name) {
@@ -13,14 +15,14 @@ function getSessionTokenFromCookieHeader(cookieHeader) {
 	return parseCookieHeader(cookieHeader, SESSION_COOKIE);
 }
 
-function getCookieOptions(req) {
+function getCookieOptions(req, { httpOnly = false } = {}) {
 	return {
 		domain: req.hostname,
 		encode: String,
-		httpOnly: false,
+		httpOnly,
 		secure: true,
 		sameSite: 'lax',
-		maxAge: SIX_MONTHS_MS
+		maxAge: SESSION_TTL_MS
 	};
 }
 
@@ -43,20 +45,20 @@ function serializeAccount(account) {
 }
 
 function setAuthCookies(res, req, { token, user }) {
-	const cookieOptions = getCookieOptions(req);
 	const account = buildAccountFromUser(user);
-	res.cookie('virgo.session', token, cookieOptions);
-	res.cookie('account', serializeAccount(account), cookieOptions);
+	// The session token is the credential — keep it httpOnly so page scripts (and any XSS) can't
+	// read it. The account cookie is display-only and must stay readable by the UI.
+	res.cookie('virgo.session', token, getCookieOptions(req, { httpOnly: true }));
+	res.cookie('account', serializeAccount(account), getCookieOptions(req));
 }
 
 function clearAuthCookies(res, req) {
-	const cookieOptions = getCookieOptions(req);
-	res.cookie('virgo.session', '', cookieOptions);
-	res.cookie('account', '', cookieOptions);
+	res.cookie('virgo.session', '', getCookieOptions(req, { httpOnly: true }));
+	res.cookie('account', '', getCookieOptions(req));
 }
 
 export {
-	SIX_MONTHS_MS,
+	SESSION_TTL_MS,
 	SESSION_COOKIE,
 	parseCookieHeader,
 	getSessionTokenFromCookieHeader,

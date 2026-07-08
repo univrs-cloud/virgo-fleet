@@ -11,6 +11,7 @@ import { emitNodes } from './proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeSocketsByNodeId = new Map();
+const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
 
 class NodeModule {
 	#nsp;
@@ -26,6 +27,14 @@ class NodeModule {
 		});
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
+		// An owner's nodes are torn down when their account is deleted (fired from the user module).
+		eventEmitter.on('nodes:owner:removed', ({ nodeIds } = {}) => {
+			for (const nodeId of nodeIds || []) {
+				this.teardownNode(nodeId).catch((error) => {
+					console.error(`Error tearing down node ${nodeId}:`, error);
+				});
+			}
+		});
 		setImmediate(() => {
 			this.#loadPlugins();
 		});
@@ -158,6 +167,24 @@ class NodeModule {
 
 	isNodeOnline(nodeId) {
 		return nodeSocketsByNodeId.has(nodeId);
+	}
+
+	/** Fully removes a node from the fleet: asks an online node to unregister (wiping its own fleet
+	 * config) first, then deletes the fleet records and drops its connection. Remaining members are
+	 * refreshed so it disappears from their inventory. Used by owner delete and owner-account delete. */
+	async teardownNode(nodeId) {
+		const affected = await DataService.listNodeMemberUserIds(nodeId);
+		const nodeSocket = this.getNodeSocket(nodeId);
+		if (nodeSocket?.connected) {
+			try {
+				await nodeSocket.timeout(FLEET_UNREGISTER_TIMEOUT_MS).emitWithAck('fleet:unregister');
+			} catch (error) {
+				console.error(`Fleet unregister request to node ${nodeId} failed:`, error?.message || error);
+			}
+		}
+		await DataService.deleteNode(nodeId);
+		this.disconnectNode(nodeId);
+		this.eventEmitter.emit('nodes:updated', { userIds: affected });
 	}
 }
 

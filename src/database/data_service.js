@@ -531,6 +531,15 @@ class DataService {
 		return [...ids];
 	}
 
+	/** nodeIds of the nodes a user owns, e.g. to tear them down when the owner's account is deleted. */
+	static async listNodesOwnedBy(userId) {
+		if (!userId) {
+			return [];
+		}
+		const nodes = await Node.findAll({ where: { ownerUserId: userId }, attributes: ['nodeId'] });
+		return nodes.map((node) => { return node.nodeId; });
+	}
+
 	static async deleteNode(nodeId) {
 		const node = await Node.findOne({ where: { nodeId } });
 		if (!node) {

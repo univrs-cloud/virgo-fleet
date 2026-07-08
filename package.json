@@ -23,6 +23,7 @@
 		"express": "^5.2.1",
 		"express-rate-limit": "^8.5.2",
 		"express-validator": "^7.3.2",
+		"helmet": "^8.2.0",
 		"sequelize": "^6.37.8",
 		"socket.io": "^4.8.3",
 		"sqlite3": "^6.0.1"

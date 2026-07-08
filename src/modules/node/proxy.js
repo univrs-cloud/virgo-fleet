@@ -2,8 +2,6 @@ import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
 import { disconnectNodeUser } from '../../utils/node_proxy.js';
 
-const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
-
 const emitNodes = async (socket, module) => {
 	try {
 		if (!socket.isAuthenticated) {
@@ -164,21 +162,9 @@ const onConnection = (socket, module) => {
 				return;
 			}
 
-			// The owner tears the node down: ask an online node to unregister (wiping its
-			// own fleet configuration) first, then clean up the fleet database regardless
-			// of the outcome. Members captured before deletion so everyone who had access refreshes.
-			const affected = await DataService.listNodeMemberUserIds(nodeId);
-			const nodeSocket = module.getNodeSocket(nodeId);
-			if (nodeSocket?.connected) {
-				try {
-					await nodeSocket.timeout(FLEET_UNREGISTER_TIMEOUT_MS).emitWithAck('fleet:unregister');
-				} catch (error) {
-					console.error(`Fleet unregister request to node ${nodeId} failed:`, error?.message || error);
-				}
-			}
-			await DataService.deleteNode(nodeId);
-			module.disconnectNode(nodeId);
-			module.eventEmitter.emit('nodes:updated', { userIds: affected });
+			// The owner tears the node down: unregister an online node (wiping its own fleet
+			// config) then remove the fleet records and refresh the remaining members.
+			await module.teardownNode(nodeId);
 			ack({ ok: true });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
