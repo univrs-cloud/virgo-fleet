@@ -133,12 +133,16 @@ class DataService {
 		}
 		user.passwordHash = bcrypt.hashSync(password, PASSWORD_COST);
 		await user.save();
+		// Invalidate every existing session so a changed password logs out all devices.
+		await FleetSession.destroy({ where: { fleetUserId: user.id } });
 		return true;
 	}
 
 	static async createSession(userId) {
 		const token = randomBytes(48).toString('hex');
 		const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+		// Opportunistically clear this user's expired sessions whenever they log in.
+		await FleetSession.destroy({ where: { fleetUserId: userId, expiresAt: { [Op.lt]: new Date() } } });
 		await FleetSession.create({
 			token,
 			expiresAt,
