@@ -135,7 +135,21 @@ function disconnectNodeClients(nodeId) {
 	clientsByNodeId.delete(nodeId);
 }
 
+/** Drops a single user's live proxy sessions for a node (e.g. after their access is revoked),
+ * so an already-bridged session is torn down immediately instead of surviving until reconnect. */
+function disconnectNodeUser(nodeId, userId) {
+	if (!userId) {
+		return;
+	}
+	for (const clientSocket of [...(clientsByNodeId.get(nodeId) ?? [])]) {
+		if (clientSocket.userId === userId) {
+			clientSocket.disconnect(true);
+		}
+	}
+}
+
 export {
 	registerFleetProxy,
-	disconnectNodeClients
+	disconnectNodeClients,
+	disconnectNodeUser
 };

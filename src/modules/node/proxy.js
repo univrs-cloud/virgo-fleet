@@ -1,5 +1,6 @@
 import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
+import { disconnectNodeUser } from '../../utils/node_proxy.js';
 
 const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
 
@@ -112,10 +113,12 @@ const onConnection = (socket, module) => {
 			}
 			// Owner protection is also enforced in DataService.revokeNodeAccess itself, so it
 			// can't be bypassed by the owner trying to remove themselves.
+			const revoked = await DataService.getUserByEmail(revokeEmail);
 			await DataService.revokeNodeAccess({
 				email: revokeEmail,
 				nodeId
 			});
+			disconnectNodeUser(nodeId, revoked?.id);
 			module.eventEmitter.emit('nodes:updated');
 			ack({ ok: true });
 		} catch (error) {
@@ -143,6 +146,7 @@ const onConnection = (socket, module) => {
 				}
 				// An invited admin only detaches their own access; the node itself is untouched.
 				await DataService.revokeNodeAccess({ email: socket.email, nodeId });
+				disconnectNodeUser(nodeId, socket.userId);
 				module.eventEmitter.emit('nodes:updated');
 				ack({ ok: true });
 				return;
