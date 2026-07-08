@@ -22,16 +22,17 @@ const injectNodeContext = (html, nodeId) => {
 	return `${baseTag}${html}`;
 };
 
-const isDocumentPath = (assetPath) => {
-	if (!assetPath || assetPath === '/' || assetPath === '') {
-		return true;
+const STATIC_ASSET_PATTERN = /\.(js|mjs|css|map|json|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|eot|txt|webmanifest)$/i;
+
+const isAssetPath = (assetPath) => {
+	const withoutQuery = (assetPath || '/').split('?')[0].split('#')[0];
+	if (!withoutQuery || withoutQuery === '/') {
+		return false;
 	}
-	const withoutQuery = assetPath.split('?')[0].split('#')[0];
-	if (withoutQuery.endsWith('/')) {
-		return true;
-	}
-	return withoutQuery.endsWith('.html');
+	return STATIC_ASSET_PATTERN.test(withoutQuery);
 };
+
+const isDocumentPath = (assetPath) => !isAssetPath(assetPath);
 
 const serveNodeContent = async (req, res, next) => {
 	try {
