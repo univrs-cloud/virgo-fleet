@@ -1,18 +1,28 @@
 import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
 
+const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
+
 const emitNodes = async (socket, module) => {
 	try {
 		if (!socket.isAuthenticated) {
 			return;
 		}
 		const nodes = await DataService.listAccessibleNodes(socket.userId);
-		socket.emit('node:inventory', nodes.map((node) => {
-			return {
+		const inventory = await Promise.all(nodes.map(async (node) => {
+			const entry = {
 				...node,
 				online: module.isNodeOnline(node.nodeId)
 			};
+			if (node.isOwner) {
+				const members = await DataService.listNodeMembers(node.nodeId);
+				entry.admins = (members.users || [])
+					.filter((user) => { return user.role !== 'owner'; })
+					.map((user) => { return { email: user.email, displayName: user.displayName }; });
+			}
+			return entry;
 		}));
+		socket.emit('node:inventory', inventory);
 	} catch (error) {
 		console.error('Error emitting nodes:', error);
 	}
@@ -57,6 +67,19 @@ const onConnection = (socket, module) => {
 				ack({ ok: false, error: 'Only owner can invite users' });
 				return;
 			}
+			const invitee = await DataService.getUserByEmail(inviteEmail);
+			if (!invitee) {
+				ack({ ok: false, error: 'No account exists for that email address' });
+				return;
+			}
+			if (await DataService.isNodeOwner(invitee.id, nodeId)) {
+				ack({ ok: false, error: 'The node owner already has access' });
+				return;
+			}
+			if (await DataService.canUserAccessNode(invitee.id, nodeId)) {
+				ack({ ok: false, error: 'This account already has access' });
+				return;
+			}
 			await DataService.grantNodeAccess({
 				email: inviteEmail,
 				nodeId,
@@ -64,29 +87,6 @@ const onConnection = (socket, module) => {
 			});
 			module.eventEmitter.emit('nodes:updated');
 			ack({ ok: true });
-		} catch (error) {
-			ack({ ok: false, error: error.message });
-		}
-	});
-
-	socket.on('node:members', async (config, ack = () => {}) => {
-		try {
-			if (!socket.isAuthenticated) {
-				ack({ ok: false, error: 'Authentication required' });
-				return;
-			}
-			const nodeId = String(config?.nodeId || '').trim();
-			if (!nodeId) {
-				ack({ ok: false, error: 'nodeId is required' });
-				return;
-			}
-			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
-			if (!owner) {
-				ack({ ok: false, error: 'Only the owner can manage node access' });
-				return;
-			}
-			const members = await DataService.listNodeMembers(nodeId);
-			ack({ ok: true, ...members });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
 		}
@@ -136,8 +136,28 @@ const onConnection = (socket, module) => {
 			}
 			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
 			if (!owner) {
-				ack({ ok: false, error: 'Only the owner can delete this node' });
+				const allowed = await DataService.canUserAccessNode(socket.userId, nodeId);
+				if (!allowed) {
+					ack({ ok: false, error: 'Access denied for node' });
+					return;
+				}
+				// An invited admin only detaches their own access; the node itself is untouched.
+				await DataService.revokeNodeAccess({ email: socket.email, nodeId });
+				module.eventEmitter.emit('nodes:updated');
+				ack({ ok: true });
 				return;
+			}
+
+			// The owner tears the node down: ask an online node to unregister (wiping its
+			// own fleet configuration) first, then clean up the fleet database regardless
+			// of the outcome.
+			const nodeSocket = module.getNodeSocket(nodeId);
+			if (nodeSocket?.connected) {
+				try {
+					await nodeSocket.timeout(FLEET_UNREGISTER_TIMEOUT_MS).emitWithAck('fleet:unregister');
+				} catch (error) {
+					console.error(`Fleet unregister request to node ${nodeId} failed:`, error?.message || error);
+				}
 			}
 			await DataService.deleteNode(nodeId);
 			module.disconnectNode(nodeId);
