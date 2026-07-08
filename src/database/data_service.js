@@ -121,7 +121,7 @@ class DataService {
 		if (!user) {
 			throw new Error(`User ${email} not found.`);
 		}
-		await FleetSession.destroy({ where: { fleetUserId: user.id } });
+		// Sessions, owned nodes, created groups, memberships and access rows all cascade from this.
 		await user.destroy();
 		return true;
 	}
@@ -531,7 +531,8 @@ class DataService {
 		return [...ids];
 	}
 
-	/** nodeIds of the nodes a user owns, e.g. to tear them down when the owner's account is deleted. */
+	/** nodeIds of the nodes a user owns. Captured before deleting the owner so we can still notify
+	 * those nodes to unregister after the DB has cascade-deleted their records. */
 	static async listNodesOwnedBy(userId) {
 		if (!userId) {
 			return [];

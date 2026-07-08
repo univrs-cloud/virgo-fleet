@@ -27,13 +27,12 @@ class NodeModule {
 		});
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
-		// An owner's nodes are torn down when their account is deleted (fired from the user module).
-		eventEmitter.on('nodes:owner:removed', ({ nodeIds } = {}) => {
-			for (const nodeId of nodeIds || []) {
-				this.teardownNode(nodeId).catch((error) => {
-					console.error(`Error tearing down node ${nodeId}:`, error);
-				});
-			}
+		// A deleted user's owned nodes are cascade-removed from the DB; notify those nodes (captured
+		// before deletion) to unregister and drop their sockets.
+		eventEmitter.on('nodes:unregister', ({ nodeIds } = {}) => {
+			this.unregisterNodes(nodeIds).catch((error) => {
+				console.error('Error unregistering nodes:', error);
+			});
 		});
 		setImmediate(() => {
 			this.#loadPlugins();
@@ -169,22 +168,37 @@ class NodeModule {
 		return nodeSocketsByNodeId.has(nodeId);
 	}
 
+	/** Best-effort request to an online node to wipe its own fleet config. */
+	async #requestUnregister(nodeId) {
+		const nodeSocket = this.getNodeSocket(nodeId);
+		if (!nodeSocket?.connected) {
+			return;
+		}
+		try {
+			await nodeSocket.timeout(FLEET_UNREGISTER_TIMEOUT_MS).emitWithAck('fleet:unregister');
+		} catch (error) {
+			console.error(`Fleet unregister request to node ${nodeId} failed:`, error?.message || error);
+		}
+	}
+
 	/** Fully removes a node from the fleet: asks an online node to unregister (wiping its own fleet
 	 * config) first, then deletes the fleet records and drops its connection. Remaining members are
-	 * refreshed so it disappears from their inventory. Used by owner delete and owner-account delete. */
+	 * refreshed so it disappears from their inventory. Used by the owner "Remove from inventory". */
 	async teardownNode(nodeId) {
 		const affected = await DataService.listNodeMemberUserIds(nodeId);
-		const nodeSocket = this.getNodeSocket(nodeId);
-		if (nodeSocket?.connected) {
-			try {
-				await nodeSocket.timeout(FLEET_UNREGISTER_TIMEOUT_MS).emitWithAck('fleet:unregister');
-			} catch (error) {
-				console.error(`Fleet unregister request to node ${nodeId} failed:`, error?.message || error);
-			}
-		}
+		await this.#requestUnregister(nodeId);
 		await DataService.deleteNode(nodeId);
 		this.disconnectNode(nodeId);
 		this.eventEmitter.emit('nodes:updated', { userIds: affected });
+	}
+
+	/** Notifies nodes to unregister and drops their sockets without touching the DB — used when the
+	 * records were already removed (e.g. cascaded by deleting their owner's account). */
+	async unregisterNodes(nodeIds) {
+		for (const nodeId of nodeIds || []) {
+			await this.#requestUnregister(nodeId);
+			this.disconnectNode(nodeId);
+		}
 	}
 }
 

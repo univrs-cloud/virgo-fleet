@@ -32,8 +32,8 @@ const GroupNodeAccess = sequelize.define('GroupNodeAccess', {}, {
 FleetUser.belongsToMany(FleetGroup, { through: FleetUserGroup, foreignKey: 'fleetUserId', otherKey: 'fleetGroupId' });
 FleetGroup.belongsToMany(FleetUser, { through: FleetUserGroup, foreignKey: 'fleetGroupId', otherKey: 'fleetUserId' });
 
-FleetUser.hasMany(FleetSession, { foreignKey: 'fleetUserId' });
-FleetSession.belongsTo(FleetUser, { foreignKey: 'fleetUserId' });
+FleetUser.hasMany(FleetSession, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
+FleetSession.belongsTo(FleetUser, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
 
 FleetUser.belongsToMany(Node, { through: NodeAccess, foreignKey: 'fleetUserId', otherKey: 'nodeId' });
 Node.belongsToMany(FleetUser, { through: NodeAccess, foreignKey: 'nodeId', otherKey: 'fleetUserId' });
@@ -41,8 +41,14 @@ Node.belongsToMany(FleetUser, { through: NodeAccess, foreignKey: 'nodeId', other
 FleetGroup.belongsToMany(Node, { through: GroupNodeAccess, foreignKey: 'fleetGroupId', otherKey: 'nodeId' });
 Node.belongsToMany(FleetGroup, { through: GroupNodeAccess, foreignKey: 'nodeId', otherKey: 'fleetGroupId' });
 
-Node.belongsTo(FleetUser, { as: 'owner', foreignKey: 'ownerUserId' });
-FleetUser.hasMany(Node, { as: 'ownedNodes', foreignKey: 'ownerUserId' });
+// Deleting a user cascades to the nodes they own and the groups they created, and those in turn
+// cascade to their access/membership/share join rows — so removing a user cleans up everything
+// they owned without any application-level enumeration.
+Node.belongsTo(FleetUser, { as: 'owner', foreignKey: 'ownerUserId', onDelete: 'CASCADE' });
+FleetUser.hasMany(Node, { as: 'ownedNodes', foreignKey: 'ownerUserId', onDelete: 'CASCADE' });
+
+FleetGroup.belongsTo(FleetUser, { as: 'creator', foreignKey: 'createdByUserId', onDelete: 'CASCADE' });
+FleetUser.hasMany(FleetGroup, { as: 'createdGroups', foreignKey: 'createdByUserId', onDelete: 'CASCADE' });
 
 export {
 	FleetUser,

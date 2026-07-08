@@ -15,13 +15,17 @@ const deleteUser = async (config, socket, module) => {
 	if (socket.email !== email) {
 		throw new Error('Not allowed to delete this user.');
 	}
-	// Capture the user's owned nodes before deletion (afterwards ownerUserId is nulled), then hand
-	// them to the node module to unregister + delete so no orphaned nodes are left behind.
+	// Keep a reference to the owned nodes before deletion, since the DB cascade will remove their
+	// records. Deleting the user removes the nodes they own and the groups they created, which in
+	// turn cascade all memberships, access rows, and node shares.
 	const ownedNodeIds = await DataService.listNodesOwnedBy(socket.userId);
 	await DataService.deleteUser(email);
 	module.eventEmitter.emit('users:updated');
+	module.eventEmitter.emit('nodes:updated');
+	module.eventEmitter.emit('groups:updated');
+	// Records are already gone; tell those nodes to unregister (wipe their own fleet config).
 	if (ownedNodeIds.length) {
-		module.eventEmitter.emit('nodes:owner:removed', { nodeIds: ownedNodeIds });
+		module.eventEmitter.emit('nodes:unregister', { nodeIds: ownedNodeIds });
 	}
 	return `User ${email} deleted.`;
 };
