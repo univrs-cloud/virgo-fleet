@@ -10,7 +10,9 @@ function createApp() {
 	const app = express();
 	app.disable('x-powered-by');
 	app.set('trust proxy', true);
-	app.use(helmet());
+	// Keep helmet's baseline hardening headers, but disable its default Content-Security-Policy:
+	// the UI compiles lodash templates at runtime via Function(), which CSP's script-src blocks.
+	app.use(helmet({ contentSecurityPolicy: false }));
 	app.use(express.json());
 	// Throttle the credential endpoints to blunt brute-force / credential-stuffing.
 	app.use(['/auth/login', '/auth/signup'], authRateLimiter);
