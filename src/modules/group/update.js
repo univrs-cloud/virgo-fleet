@@ -6,8 +6,8 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			if (!await DataService.isGroupAdmin(socket.userId, config.groupId)) {
-				ack({ ok: false, error: 'Only a group admin can update this group' });
+			if (!await DataService.isGroupManager(socket.userId, config.groupId)) {
+				ack({ ok: false, error: 'Only a group manager can update this group' });
 				return;
 			}
 			await DataService.updateGroup({

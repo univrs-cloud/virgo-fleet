@@ -7,8 +7,8 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			if (!await DataService.isGroupAdmin(socket.userId, config.groupId)) {
-				ack({ ok: false, error: 'Only a group admin can add users to this group' });
+			if (!await DataService.isGroupManager(socket.userId, config.groupId)) {
+				ack({ ok: false, error: 'Only a group manager can add users to this group' });
 				return;
 			}
 			const email = normalizeEmail(config.email);
@@ -34,8 +34,8 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			if (!await DataService.isGroupAdmin(socket.userId, config.groupId)) {
-				ack({ ok: false, error: 'Only a group admin can remove users from this group' });
+			if (!await DataService.isGroupManager(socket.userId, config.groupId)) {
+				ack({ ok: false, error: 'Only a group manager can remove users from this group' });
 				return;
 			}
 			const email = normalizeEmail(config.email);

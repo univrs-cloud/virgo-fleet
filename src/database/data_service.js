@@ -231,15 +231,15 @@ class DataService {
 		});
 	}
 
-	/** Groups the user administers (owner/admin role), in the same shape as getGroups(). A group and
-	 * its member roster are visible only to its admins; regular members never see the group or its
+	/** Groups the user manages (manager role), in the same shape as getGroups(). A group and its
+	 * member roster are visible only to its managers; regular members never see the group or its
 	 * co-members — they only gain access to the nodes shared with it. */
 	static async getManagedGroups(userId) {
 		if (!userId) {
 			return [];
 		}
 		const memberships = await FleetUserGroup.findAll({
-			where: { fleetUserId: userId, role: 'admin' },
+			where: { fleetUserId: userId, role: 'manager' },
 			attributes: ['fleetGroupId']
 		});
 		const groupIds = new Set(memberships.map((membership) => { return membership.fleetGroupId; }));
@@ -282,22 +282,23 @@ class DataService {
 		if (createdByUserId) {
 			const creator = await FleetUser.findByPk(createdByUserId);
 			if (creator) {
-				await group.addFleetUser(creator, { through: { role: 'admin' } });
+				await group.addFleetUser(creator, { through: { role: 'manager' } });
 			}
 		}
 		return group;
 	}
 
-	/** Group management (update/delete/invite/membership) is restricted to members with the 'admin'
-	 * role on that specific group (keyed by id, since names are not unique), as there is no global admin. */
-	static async isGroupAdmin(userId, groupId) {
+	/** Group management (update/delete/membership/node-sharing) is restricted to members with the
+	 * 'manager' role on that specific group (keyed by id, since names are not unique), as there is
+	 * no global admin. */
+	static async isGroupManager(userId, groupId) {
 		if (!userId || !groupId) {
 			return false;
 		}
 		const membership = await FleetUserGroup.findOne({
 			where: { fleetUserId: userId, fleetGroupId: groupId }
 		});
-		return membership?.role === 'admin';
+		return membership?.role === 'manager';
 	}
 
 	static async updateGroup({ groupId, description, newName }) {
@@ -391,7 +392,7 @@ class DataService {
 		}
 	}
 
-	static async grantNodeAccess({ email, nodeId, role = 'invited' }) {
+	static async grantNodeAccess({ email, nodeId, role = 'admin' }) {
 		const user = await this.getUserByEmail(email);
 		const node = await Node.findOne({ where: { nodeId } });
 		if (!user || !node) {
@@ -497,7 +498,7 @@ class DataService {
 				return {
 					email: user.email,
 					displayName: user.displayName,
-					role: user.NodeAccess?.role || 'invited'
+					role: user.NodeAccess?.role || 'admin'
 				};
 			}),
 			groups: (plain.FleetGroups || []).map((group) => {

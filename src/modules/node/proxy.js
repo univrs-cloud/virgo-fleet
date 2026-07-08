@@ -91,7 +91,7 @@ const onConnection = (socket, module) => {
 			await DataService.grantNodeAccess({
 				email: inviteEmail,
 				nodeId,
-				role: 'invited'
+				role: 'admin'
 			});
 			const affected = await DataService.listNodeMemberUserIds(nodeId);
 			module.eventEmitter.emit('nodes:updated', { userIds: affected });
@@ -191,9 +191,9 @@ const onConnection = (socket, module) => {
 				return;
 			}
 			const owner = await DataService.isNodeOwner(socket.userId, config.nodeId);
-			const groupAdmin = await DataService.isGroupAdmin(socket.userId, config.groupId);
-			if (!owner || !groupAdmin) {
-				ack({ ok: false, error: 'Only the node owner and a group admin can share a node with a group' });
+			const groupManager = await DataService.isGroupManager(socket.userId, config.groupId);
+			if (!owner || !groupManager) {
+				ack({ ok: false, error: 'Only the node owner and a group manager can share a node with a group' });
 				return;
 			}
 			await DataService.grantGroupNodeAccess({

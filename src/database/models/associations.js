@@ -7,7 +7,7 @@ import { DataTypes } from 'sequelize';
 
 const FleetUserGroup = sequelize.define('FleetUserGroup', {
 	role: {
-		type: DataTypes.ENUM('member', 'admin'),
+		type: DataTypes.ENUM('member', 'manager'),
 		allowNull: false,
 		defaultValue: 'member'
 	}
@@ -17,9 +17,9 @@ const FleetUserGroup = sequelize.define('FleetUserGroup', {
 
 const NodeAccess = sequelize.define('NodeAccess', {
 	role: {
-		type: DataTypes.ENUM('owner', 'invited'),
+		type: DataTypes.ENUM('owner', 'admin'),
 		allowNull: false,
-		defaultValue: 'invited'
+		defaultValue: 'admin'
 	}
 }, {
 	tableName: 'node_accesses'
