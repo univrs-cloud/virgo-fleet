@@ -6,13 +6,13 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			if (!await DataService.isGroupAdmin(socket.userId, config.name)) {
+			if (!await DataService.isGroupAdmin(socket.userId, config.groupId)) {
 				ack({ ok: false, error: 'Only a group admin can delete this group' });
 				return;
 			}
-			await DataService.deleteGroup(config.name);
+			await DataService.deleteGroup(config.groupId);
 			module.eventEmitter.emit('groups:updated');
-			ack({ ok: true, message: `Group ${config.name} deleted.` });
+			ack({ ok: true, message: 'Group deleted.' });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
 		}

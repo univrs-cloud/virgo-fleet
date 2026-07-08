@@ -9,15 +9,28 @@ const FleetGroup = sequelize.define('FleetGroup', {
 	},
 	name: {
 		type: DataTypes.STRING,
-		allowNull: false,
-		unique: true
+		allowNull: false
 	},
 	description: {
 		type: DataTypes.STRING,
 		allowNull: true
+	},
+	createdByUserId: {
+		type: DataTypes.INTEGER,
+		allowNull: true
 	}
 }, {
-	tableName: 'fleet_groups'
+	tableName: 'fleet_groups',
+	// Group names are unique per creator, not globally: different users may share a name, but a
+	// single user cannot have two groups with the same name. (NULLs are distinct in SQLite, so
+	// legacy groups without a creator are exempt.)
+	indexes: [
+		{
+			name: 'ux_fleet_groups_creator_name',
+			unique: true,
+			fields: ['createdByUserId', 'name']
+		}
+	]
 });
 
 export default FleetGroup;

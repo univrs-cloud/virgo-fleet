@@ -7,8 +7,7 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			const groupName = config.groupName || config.name;
-			if (!await DataService.isGroupAdmin(socket.userId, groupName)) {
+			if (!await DataService.isGroupAdmin(socket.userId, config.groupId)) {
 				ack({ ok: false, error: 'Only a group admin can add users to this group' });
 				return;
 			}
@@ -18,7 +17,7 @@ const onConnection = (socket, module) => {
 				return;
 			}
 			await DataService.addUserToGroup({
-				groupName: config.groupName || config.name,
+				groupId: config.groupId,
 				email,
 				role: config.role || 'member'
 			});
@@ -35,8 +34,7 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			const groupName = config.groupName || config.name;
-			if (!await DataService.isGroupAdmin(socket.userId, groupName)) {
+			if (!await DataService.isGroupAdmin(socket.userId, config.groupId)) {
 				ack({ ok: false, error: 'Only a group admin can remove users from this group' });
 				return;
 			}
@@ -46,7 +44,7 @@ const onConnection = (socket, module) => {
 				return;
 			}
 			await DataService.removeUserFromGroup({
-				groupName: config.groupName || config.name,
+				groupId: config.groupId,
 				email
 			});
 			module.eventEmitter.emit('groups:updated');

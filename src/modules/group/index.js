@@ -1,37 +1,33 @@
 import BaseModule from '../base.js';
 import DataService from '../../database/data_service.js';
 
+/** A user only ever receives the groups they administer, so group existence, membership, and
+ * shared-node details never leak to regular members or unrelated users. */
+const emitGroups = async (socket) => {
+	if (!socket.isAuthenticated) {
+		return;
+	}
+	try {
+		const groups = await DataService.getManagedGroups(socket.userId);
+		socket.emit('groups', groups);
+	} catch (error) {
+		console.error('Error emitting groups:', error);
+	}
+};
+
 class GroupModule extends BaseModule {
 	constructor() {
 		super('group');
 
-		(async () => {
-			await this.#loadGroups();
-		})();
-
 		this.eventEmitter.on('groups:updated', async () => {
-			await this.#loadGroups();
-			this.nsp.sockets.forEach((socket) => {
-				if (socket.isAuthenticated) {
-					socket.emit('groups', this.getState('groups'));
-				}
-			});
+			for (const socket of this.nsp.sockets.values()) {
+				await emitGroups(socket);
+			}
 		});
 	}
 
 	onConnection(socket) {
-		if (this.getState('groups') && socket.isAuthenticated) {
-			socket.emit('groups', this.getState('groups'));
-		}
-	}
-
-	async #loadGroups() {
-		try {
-			const groups = await DataService.getGroups();
-			this.setState('groups', groups);
-		} catch (error) {
-			this.setState('groups', false);
-		}
+		emitGroups(socket);
 	}
 }
 

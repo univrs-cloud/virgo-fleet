@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'crypto';
+import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { sequelize } from './index.js';
@@ -7,7 +7,6 @@ import {
 	FleetGroup,
 	Node,
 	FleetSession,
-	GroupInvite,
 	FleetUserGroup,
 	NodeAccess,
 	GroupNodeAccess
@@ -232,18 +231,53 @@ class DataService {
 		});
 	}
 
+	/** Groups the user administers (owner/admin role), in the same shape as getGroups(). A group and
+	 * its member roster are visible only to its admins; regular members never see the group or its
+	 * co-members — they only gain access to the nodes shared with it. */
+	static async getManagedGroups(userId) {
+		if (!userId) {
+			return [];
+		}
+		const memberships = await FleetUserGroup.findAll({
+			where: { fleetUserId: userId, role: 'admin' },
+			attributes: ['fleetGroupId']
+		});
+		const groupIds = new Set(memberships.map((membership) => { return membership.fleetGroupId; }));
+		if (groupIds.size === 0) {
+			return [];
+		}
+		const groups = await this.getGroups();
+		return groups.filter((group) => { return groupIds.has(group.id); });
+	}
+
+	/** Ids of a group's members, for targeting broadcasts when a node is shared with the group. */
+	static async listGroupMemberUserIds(groupId) {
+		const group = await FleetGroup.findByPk(groupId, {
+			include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+		});
+		if (!group) {
+			return [];
+		}
+		return (group.FleetUsers || []).map((user) => { return user.id; });
+	}
+
 	static async createGroup({ name, description, createdByUserId }) {
 		const normalizedName = String(name || '').trim();
 		if (!normalizedName) {
 			throw new Error('Group name is required.');
 		}
-		const existing = await FleetGroup.findOne({ where: { name: normalizedName } });
-		if (existing) {
-			throw new Error('Group already exists.');
+		// Names are unique per creator, not globally: different users may each have a group with the
+		// same name, but a single user cannot create two groups sharing a name.
+		if (createdByUserId) {
+			const existing = await FleetGroup.findOne({ where: { name: normalizedName, createdByUserId } });
+			if (existing) {
+				throw new Error('You already have a group with that name.');
+			}
 		}
 		const group = await FleetGroup.create({
 			name: normalizedName,
-			description: description || null
+			description: description || null,
+			createdByUserId: createdByUserId || null
 		});
 		if (createdByUserId) {
 			const creator = await FleetUser.findByPk(createdByUserId);
@@ -254,25 +288,22 @@ class DataService {
 		return group;
 	}
 
-	/** Group management (update/delete/invite/membership) is restricted to members with the 'admin' role on that specific group, since there is no global admin. */
-	static async isGroupAdmin(userId, groupName) {
-		if (!userId || !groupName) {
-			return false;
-		}
-		const group = await FleetGroup.findOne({ where: { name: groupName } });
-		if (!group) {
+	/** Group management (update/delete/invite/membership) is restricted to members with the 'admin'
+	 * role on that specific group (keyed by id, since names are not unique), as there is no global admin. */
+	static async isGroupAdmin(userId, groupId) {
+		if (!userId || !groupId) {
 			return false;
 		}
 		const membership = await FleetUserGroup.findOne({
-			where: { fleetUserId: userId, fleetGroupId: group.id }
+			where: { fleetUserId: userId, fleetGroupId: groupId }
 		});
 		return membership?.role === 'admin';
 	}
 
-	static async updateGroup({ name, description, newName }) {
-		const group = await FleetGroup.findOne({ where: { name } });
+	static async updateGroup({ groupId, description, newName }) {
+		const group = await FleetGroup.findByPk(groupId);
 		if (!group) {
-			throw new Error(`Group ${name} not found.`);
+			throw new Error(`Group ${groupId} not found.`);
 		}
 		if (newName) {
 			group.name = newName;
@@ -284,18 +315,17 @@ class DataService {
 		return group;
 	}
 
-	static async deleteGroup(name) {
-		const group = await FleetGroup.findOne({ where: { name } });
+	static async deleteGroup(groupId) {
+		const group = await FleetGroup.findByPk(groupId);
 		if (!group) {
-			throw new Error(`Group ${name} not found.`);
+			throw new Error(`Group ${groupId} not found.`);
 		}
-		await GroupInvite.destroy({ where: { fleetGroupId: group.id } });
 		await group.destroy();
 		return true;
 	}
 
-	static async addUserToGroup({ groupName, email, role = 'member' }) {
-		const group = await FleetGroup.findOne({ where: { name: groupName } });
+	static async addUserToGroup({ groupId, email, role = 'member' }) {
+		const group = await FleetGroup.findByPk(groupId);
 		const user = await this.getUserByEmail(email);
 		if (!group || !user) {
 			throw new Error('Group or user not found.');
@@ -304,52 +334,13 @@ class DataService {
 		return true;
 	}
 
-	static async removeUserFromGroup({ groupName, email }) {
-		const group = await FleetGroup.findOne({ where: { name: groupName } });
+	static async removeUserFromGroup({ groupId, email }) {
+		const group = await FleetGroup.findByPk(groupId);
 		const user = await this.getUserByEmail(email);
 		if (!group || !user) {
 			throw new Error('Group or user not found.');
 		}
 		await group.removeFleetUser(user);
-		return true;
-	}
-
-	static async createGroupInvite({ groupName, invitedByUserId, email }) {
-		const group = await FleetGroup.findOne({ where: { name: groupName } });
-		if (!group) {
-			throw new Error(`Group ${groupName} not found.`);
-		}
-		const normalizedEmail = normalizeEmail(email);
-		const invite = await GroupInvite.create({
-			fleetGroupId: group.id,
-			invitedByUserId: invitedByUserId,
-			email: normalizedEmail || null,
-			token: randomUUID(),
-			status: 'pending',
-			expiresAt: new Date(Date.now() + (1000 * 60 * 60 * 24 * 7))
-		});
-		return invite;
-	}
-
-	static async acceptGroupInvite(token, email) {
-		const invite = await GroupInvite.findOne({
-			where: {
-				token,
-				status: 'pending',
-				expiresAt: { [Op.gt]: new Date() }
-			},
-			include: [FleetGroup]
-		});
-		if (!invite) {
-			throw new Error('Invite not found or expired.');
-		}
-		const user = await this.getUserByEmail(email);
-		if (!user) {
-			throw new Error('User not found.');
-		}
-		await invite.FleetGroup.addFleetUser(user, { through: { role: 'member' } });
-		invite.status = 'accepted';
-		await invite.save();
 		return true;
 	}
 
@@ -423,8 +414,8 @@ class DataService {
 		return true;
 	}
 
-	static async grantGroupNodeAccess({ groupName, nodeId }) {
-		const group = await FleetGroup.findOne({ where: { name: groupName } });
+	static async grantGroupNodeAccess({ groupId, nodeId }) {
+		const group = await FleetGroup.findByPk(groupId);
 		const node = await Node.findOne({ where: { nodeId } });
 		if (!group || !node) {
 			throw new Error('Group or node not found.');
@@ -462,7 +453,8 @@ class DataService {
 					nodeId: node.nodeId,
 					name: node.name,
 					lastSeenAt: node.lastSeenAt,
-					access: `group:${group.name}`,
+					// Coarse label only — the granting group's name is never exposed to its members.
+					access: 'group',
 					isOwner: node.ownerUserId === userId
 				});
 			}
@@ -512,6 +504,26 @@ class DataService {
 				return { name: group.name };
 			})
 		};
+	}
+
+	/** Ids of every user with access to a node (owner + directly-invited members), for targeting
+	 * inventory broadcasts. Capture this before a removal so the user losing access is still included. */
+	static async listNodeMemberUserIds(nodeId) {
+		const node = await Node.findOne({
+			where: { nodeId },
+			include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+		});
+		if (!node) {
+			return [];
+		}
+		const ids = new Set();
+		if (node.ownerUserId) {
+			ids.add(node.ownerUserId);
+		}
+		for (const user of node.FleetUsers || []) {
+			ids.add(user.id);
+		}
+		return [...ids];
 	}
 
 	static async deleteNode(nodeId) {

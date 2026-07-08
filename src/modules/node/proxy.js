@@ -29,18 +29,25 @@ const emitNodes = async (socket, module) => {
 	}
 };
 
-/** Per-user accessible node lists differ, so a plain `nsp.emit` broadcast can't be used; re-run `emitNodes` for each connected user socket instead. */
-const broadcastNodes = async (module) => {
+/** Per-user accessible node lists differ, so a plain `nsp.emit` broadcast can't be used; re-run
+ * `emitNodes` for each connected user socket instead. When `affectedUserIds` is provided, only the
+ * users whose inventory actually changed are refreshed; otherwise every connected user is refreshed. */
+const broadcastNodes = async (module, affectedUserIds) => {
+	const targeted = Array.isArray(affectedUserIds) ? new Set(affectedUserIds) : null;
 	for (const socket of module.nsp.sockets.values()) {
-		if (socket.data?.role === 'user' && socket.isAuthenticated) {
-			await emitNodes(socket, module);
+		if (socket.data?.role !== 'user' || !socket.isAuthenticated) {
+			continue;
 		}
+		if (targeted && !targeted.has(socket.userId)) {
+			continue;
+		}
+		await emitNodes(socket, module);
 	}
 };
 
 const register = (module) => {
-	module.eventEmitter.on('nodes:updated', () => {
-		broadcastNodes(module).catch((error) => {
+	module.eventEmitter.on('nodes:updated', (payload) => {
+		broadcastNodes(module, payload?.userIds).catch((error) => {
 			console.error('Error broadcasting nodes:', error);
 		});
 	});
@@ -86,7 +93,8 @@ const onConnection = (socket, module) => {
 				nodeId,
 				role: 'invited'
 			});
-			module.eventEmitter.emit('nodes:updated');
+			const affected = await DataService.listNodeMemberUserIds(nodeId);
+			module.eventEmitter.emit('nodes:updated', { userIds: affected });
 			ack({ ok: true });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
@@ -114,12 +122,14 @@ const onConnection = (socket, module) => {
 			// Owner protection is also enforced in DataService.revokeNodeAccess itself, so it
 			// can't be bypassed by the owner trying to remove themselves.
 			const revoked = await DataService.getUserByEmail(revokeEmail);
+			// Captured before the revoke so the user losing access is still refreshed.
+			const affected = await DataService.listNodeMemberUserIds(nodeId);
 			await DataService.revokeNodeAccess({
 				email: revokeEmail,
 				nodeId
 			});
 			disconnectNodeUser(nodeId, revoked?.id);
-			module.eventEmitter.emit('nodes:updated');
+			module.eventEmitter.emit('nodes:updated', { userIds: affected });
 			ack({ ok: true });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
@@ -145,16 +155,19 @@ const onConnection = (socket, module) => {
 					return;
 				}
 				// An invited admin only detaches their own access; the node itself is untouched.
+				// Members captured before the revoke so the departing admin is still refreshed.
+				const affected = await DataService.listNodeMemberUserIds(nodeId);
 				await DataService.revokeNodeAccess({ email: socket.email, nodeId });
 				disconnectNodeUser(nodeId, socket.userId);
-				module.eventEmitter.emit('nodes:updated');
+				module.eventEmitter.emit('nodes:updated', { userIds: affected });
 				ack({ ok: true });
 				return;
 			}
 
 			// The owner tears the node down: ask an online node to unregister (wiping its
 			// own fleet configuration) first, then clean up the fleet database regardless
-			// of the outcome.
+			// of the outcome. Members captured before deletion so everyone who had access refreshes.
+			const affected = await DataService.listNodeMemberUserIds(nodeId);
 			const nodeSocket = module.getNodeSocket(nodeId);
 			if (nodeSocket?.connected) {
 				try {
@@ -165,7 +178,7 @@ const onConnection = (socket, module) => {
 			}
 			await DataService.deleteNode(nodeId);
 			module.disconnectNode(nodeId);
-			module.eventEmitter.emit('nodes:updated');
+			module.eventEmitter.emit('nodes:updated', { userIds: affected });
 			ack({ ok: true });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
@@ -177,19 +190,25 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			const groupName = config.groupName || config.name;
 			const owner = await DataService.isNodeOwner(socket.userId, config.nodeId);
-			const groupAdmin = await DataService.isGroupAdmin(socket.userId, groupName);
+			const groupAdmin = await DataService.isGroupAdmin(socket.userId, config.groupId);
 			if (!owner || !groupAdmin) {
 				ack({ ok: false, error: 'Only the node owner and a group admin can share a node with a group' });
 				return;
 			}
 			await DataService.grantGroupNodeAccess({
-				groupName: config.groupName || config.name,
+				groupId: config.groupId,
 				nodeId: config.nodeId
 			});
+			// Sharing a node with a group changes the accessible-node list for the node's own
+			// members and everyone in the group, so refresh exactly those users.
+			const [nodeMembers, groupMembers] = await Promise.all([
+				DataService.listNodeMemberUserIds(config.nodeId),
+				DataService.listGroupMemberUserIds(config.groupId)
+			]);
+			const affected = [...new Set([...nodeMembers, ...groupMembers])];
 			module.eventEmitter.emit('groups:updated');
-			module.eventEmitter.emit('nodes:updated');
+			module.eventEmitter.emit('nodes:updated', { userIds: affected });
 			ack({ ok: true });
 		} catch (error) {
 			ack({ ok: false, error: error.message });

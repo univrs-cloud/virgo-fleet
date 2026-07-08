@@ -6,17 +6,17 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			if (!await DataService.isGroupAdmin(socket.userId, config.name)) {
+			if (!await DataService.isGroupAdmin(socket.userId, config.groupId)) {
 				ack({ ok: false, error: 'Only a group admin can update this group' });
 				return;
 			}
 			await DataService.updateGroup({
-				name: config.name,
+				groupId: config.groupId,
 				newName: config.newName,
 				description: config.description
 			});
 			module.eventEmitter.emit('groups:updated');
-			ack({ ok: true, message: `Group ${config.name} updated.` });
+			ack({ ok: true, message: 'Group updated.' });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
 		}

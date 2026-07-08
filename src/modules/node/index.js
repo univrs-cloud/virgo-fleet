@@ -77,8 +77,9 @@ class NodeModule {
 		this.#nsp.on('connection', (socket) => {
 			if (socket.data?.role === 'node' && socket.data?.nodeId) {
 				this.setNodeSocket(socket.data.nodeId, socket);
-				DataService.touchNodeLastSeen(socket.data.nodeId).then(() => {
-					this.eventEmitter.emit('nodes:updated');
+				DataService.touchNodeLastSeen(socket.data.nodeId).then(async () => {
+					const userIds = await DataService.listNodeMemberUserIds(socket.data.nodeId);
+					this.eventEmitter.emit('nodes:updated', { userIds });
 				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
@@ -97,8 +98,9 @@ class NodeModule {
 					nodeSocketsByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					this.#broadcastNodeStatus(nodeId, false);
-					DataService.touchNodeLastSeen(nodeId).then(() => {
-						this.eventEmitter.emit('nodes:updated');
+					DataService.touchNodeLastSeen(nodeId).then(async () => {
+						const userIds = await DataService.listNodeMemberUserIds(nodeId);
+						this.eventEmitter.emit('nodes:updated', { userIds });
 					});
 				}
 			});
@@ -126,11 +128,16 @@ class NodeModule {
 		}
 	}
 
-	#broadcastNodeStatus(nodeId, online) {
-		for (const socket of this.#nsp.sockets.values()) {
-			if (socket.data?.role === 'user' && socket.isAuthenticated) {
-				socket.emit('node:status', { nodeId, online });
+	async #broadcastNodeStatus(nodeId, online) {
+		try {
+			const memberIds = new Set(await DataService.listNodeMemberUserIds(nodeId));
+			for (const socket of this.#nsp.sockets.values()) {
+				if (socket.data?.role === 'user' && socket.isAuthenticated && memberIds.has(socket.userId)) {
+					socket.emit('node:status', { nodeId, online });
+				}
 			}
+		} catch (error) {
+			console.error('Error broadcasting node status:', error);
 		}
 	}
 

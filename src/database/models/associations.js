@@ -2,7 +2,6 @@ import FleetUser from './FleetUser.js';
 import FleetGroup from './FleetGroup.js';
 import Node from './Node.js';
 import FleetSession from './FleetSession.js';
-import GroupInvite from './GroupInvite.js';
 import { sequelize } from '../index.js';
 import { DataTypes } from 'sequelize';
 
@@ -42,11 +41,6 @@ Node.belongsToMany(FleetUser, { through: NodeAccess, foreignKey: 'nodeId', other
 FleetGroup.belongsToMany(Node, { through: GroupNodeAccess, foreignKey: 'fleetGroupId', otherKey: 'nodeId' });
 Node.belongsToMany(FleetGroup, { through: GroupNodeAccess, foreignKey: 'nodeId', otherKey: 'fleetGroupId' });
 
-FleetGroup.hasMany(GroupInvite, { foreignKey: 'fleetGroupId' });
-GroupInvite.belongsTo(FleetGroup, { foreignKey: 'fleetGroupId' });
-FleetUser.hasMany(GroupInvite, { as: 'sentInvites', foreignKey: 'invitedByUserId' });
-GroupInvite.belongsTo(FleetUser, { as: 'invitedBy', foreignKey: 'invitedByUserId' });
-
 Node.belongsTo(FleetUser, { as: 'owner', foreignKey: 'ownerUserId' });
 FleetUser.hasMany(Node, { as: 'ownedNodes', foreignKey: 'ownerUserId' });
 
@@ -55,7 +49,6 @@ export {
 	FleetGroup,
 	Node,
 	FleetSession,
-	GroupInvite,
 	FleetUserGroup,
 	NodeAccess,
 	GroupNodeAccess

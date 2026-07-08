@@ -32,7 +32,7 @@ const onConnection = (socket, module) => {
 			});
 			socket.data.nodeId = serialNumber;
 			module.setNodeSocket(serialNumber, socket);
-			module.eventEmitter.emit('nodes:updated');
+			module.eventEmitter.emit('nodes:updated', { userIds: [owner.id] });
 			ack({ ok: true, nodeId: serialNumber, token: node.token });
 		} catch (error) {
 			ack({ ok: false, error: error.message });
