@@ -354,7 +354,7 @@ class DataService {
 		if (!normalizedNodeId) {
 			throw new Error('nodeId is required');
 		}
-		const [node] = await Node.findOrCreate({
+		const [node, created] = await Node.findOrCreate({
 			where: { nodeId: normalizedNodeId },
 			defaults: {
 				nodeId: normalizedNodeId,
@@ -364,6 +364,11 @@ class DataService {
 				token: randomBytes(32).toString('hex')
 			}
 		});
+		// Prevent ownership hijacking: an already-registered node can only be re-registered by its
+		// current owner. Otherwise anyone who knows the nodeId could re-register it and steal it.
+		if (!created && ownerUserId && node.ownerUserId && node.ownerUserId !== ownerUserId) {
+			throw new Error('This node is already registered to another account');
+		}
 		node.name = name || node.name;
 		node.lastSeenAt = new Date();
 		if (ownerUserId) {
