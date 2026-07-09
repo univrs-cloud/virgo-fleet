@@ -7,14 +7,14 @@ const onConnection = (socket, module) => {
 				return;
 			}
 			if (!await DataService.isGroupManager(socket.userId, config.groupId)) {
-				ack({ ok: false, error: 'Only a group manager can delete this group' });
+				ack({ status: 'failed', message: 'Only a group manager can delete this group.' });
 				return;
 			}
 			await DataService.deleteGroup(config.groupId);
 			module.eventEmitter.emit('groups:updated');
-			ack({ ok: true, message: 'Group deleted.' });
+			ack({ status: 'succeeded', message: 'Group deleted.' });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 };

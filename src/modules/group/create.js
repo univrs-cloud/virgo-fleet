@@ -12,9 +12,9 @@ const onConnection = (socket, module) => {
 				createdByUserId: socket.userId
 			});
 			module.eventEmitter.emit('groups:updated');
-			ack({ ok: true, message: `Group ${config.name} created.` });
+			ack({ status: 'succeeded', message: `Group ${config.name} created.` });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 };

@@ -90,7 +90,7 @@ class DataService {
 	static async createUser({ email, displayName, password }) {
 		const normalizedEmail = normalizeEmail(email);
 		if (!normalizedEmail || !password) {
-			throw new Error('email and password are required');
+			throw new Error('email and password are required.');
 		}
 		const existing = await this.getUserByEmail(normalizedEmail);
 		if (existing) {
@@ -352,7 +352,7 @@ class DataService {
 	static async upsertNode({ nodeId, name, ownerUserId }) {
 		const normalizedNodeId = String(nodeId || '').trim();
 		if (!normalizedNodeId) {
-			throw new Error('nodeId is required');
+			throw new Error('nodeId is required.');
 		}
 		const [node, created] = await Node.findOrCreate({
 			where: { nodeId: normalizedNodeId },
@@ -367,7 +367,7 @@ class DataService {
 		// Prevent ownership hijacking: an already-registered node can only be re-registered by its
 		// current owner. Otherwise anyone who knows the nodeId could re-register it and steal it.
 		if (!created && ownerUserId && node.ownerUserId && node.ownerUserId !== ownerUserId) {
-			throw new Error('This node is already registered to another account');
+			throw new Error('This node is already registered to another account.');
 		}
 		node.name = name || node.name;
 		node.lastSeenAt = new Date();

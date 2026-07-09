@@ -4,7 +4,7 @@ import { normalizeEmail } from '../../utils/email.js';
 const deleteUser = async (config, socket, module) => {
 	const email = normalizeEmail(config.email);
 	if (!email) {
-		throw new Error('email is required');
+		throw new Error('email is required.');
 	}
 	const user = module.toArray(module.getState('users')).find((entry) => {
 		return entry.email === email;
@@ -37,9 +37,9 @@ const onConnection = (socket, module) => {
 				return;
 			}
 			const message = await deleteUser(config, socket, module);
-			ack({ ok: true, message });
+			ack({ status: 'succeeded', message });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 };

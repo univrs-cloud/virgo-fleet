@@ -8,12 +8,12 @@ const onConnection = (socket, module) => {
 				return;
 			}
 			if (!await DataService.isGroupManager(socket.userId, config.groupId)) {
-				ack({ ok: false, error: 'Only a group manager can add users to this group' });
+				ack({ status: 'failed', message: 'Only a group manager can add users to this group.' });
 				return;
 			}
 			const email = normalizeEmail(config.email);
 			if (!email) {
-				ack({ ok: false, error: 'email is required' });
+				ack({ status: 'failed', message: 'email is required.' });
 				return;
 			}
 			await DataService.addUserToGroup({
@@ -23,9 +23,9 @@ const onConnection = (socket, module) => {
 			});
 			module.eventEmitter.emit('groups:updated');
 			module.eventEmitter.emit('users:updated');
-			ack({ ok: true, message: `User ${email} added to group.` });
+			ack({ status: 'succeeded', message: `User ${email} added to group.` });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 
@@ -35,12 +35,12 @@ const onConnection = (socket, module) => {
 				return;
 			}
 			if (!await DataService.isGroupManager(socket.userId, config.groupId)) {
-				ack({ ok: false, error: 'Only a group manager can remove users from this group' });
+				ack({ status: 'failed', message: 'Only a group manager can remove users from this group.' });
 				return;
 			}
 			const email = normalizeEmail(config.email);
 			if (!email) {
-				ack({ ok: false, error: 'email is required' });
+				ack({ status: 'failed', message: 'email is required.' });
 				return;
 			}
 			await DataService.removeUserFromGroup({
@@ -49,9 +49,9 @@ const onConnection = (socket, module) => {
 			});
 			module.eventEmitter.emit('groups:updated');
 			module.eventEmitter.emit('users:updated');
-			ack({ ok: true, message: `User ${email} removed from group.` });
+			ack({ status: 'succeeded', message: `User ${email} removed from group.` });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 };

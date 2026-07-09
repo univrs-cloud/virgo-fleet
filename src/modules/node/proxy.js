@@ -59,31 +59,31 @@ const onConnection = (socket, module) => {
 	socket.on('node:invite', async (config, ack = () => {}) => {
 		try {
 			if (!socket.isAuthenticated) {
-				ack({ ok: false, error: 'Authentication required' });
+				ack({ status: 'failed', message: 'Authentication required.' });
 				return;
 			}
 			const nodeId = String(config?.nodeId || '').trim();
 			const inviteEmail = normalizeEmail(config?.email);
 			if (!nodeId || !inviteEmail) {
-				ack({ ok: false, error: 'nodeId and email are required' });
+				ack({ status: 'failed', message: 'nodeId and email are required.' });
 				return;
 			}
 			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
 			if (!owner) {
-				ack({ ok: false, error: 'Only owner can invite users' });
+				ack({ status: 'failed', message: 'Only owner can invite users.' });
 				return;
 			}
 			const invitee = await DataService.getUserByEmail(inviteEmail);
 			if (!invitee) {
-				ack({ ok: false, error: 'No account exists for that email address' });
+				ack({ status: 'failed', message: 'No account exists for that email address.' });
 				return;
 			}
 			if (await DataService.isNodeOwner(invitee.id, nodeId)) {
-				ack({ ok: false, error: 'The node owner already has access' });
+				ack({ status: 'failed', message: 'The node owner already has access.' });
 				return;
 			}
 			if (await DataService.canUserAccessNode(invitee.id, nodeId)) {
-				ack({ ok: false, error: 'This account already has access' });
+				ack({ status: 'failed', message: 'This account already has access.' });
 				return;
 			}
 			await DataService.grantNodeAccess({
@@ -93,28 +93,28 @@ const onConnection = (socket, module) => {
 			});
 			const affected = await DataService.listNodeMemberUserIds(nodeId);
 			module.eventEmitter.emit('nodes:updated', { userIds: affected });
-			ack({ ok: true });
+			ack({ status: 'succeeded' });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 
 	socket.on('node:revoke', async (config, ack = () => {}) => {
 		try {
 			if (!socket.isAuthenticated) {
-				ack({ ok: false, error: 'Authentication required' });
+				ack({ status: 'failed', message: 'Authentication required.' });
 				return;
 			}
 			const nodeId = String(config?.nodeId || '').trim();
 			const revokeEmail = normalizeEmail(config?.email);
 			if (!nodeId || !revokeEmail) {
-				ack({ ok: false, error: 'nodeId and email are required' });
+				ack({ status: 'failed', message: 'nodeId and email are required.' });
 				return;
 			}
 			const isSelf = socket.email === revokeEmail;
 			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
 			if (!owner && !isSelf) {
-				ack({ ok: false, error: 'Only the owner or the account itself can manage node access' });
+				ack({ status: 'failed', message: 'Only the owner or the account itself can manage node access.' });
 				return;
 			}
 			// Owner protection is also enforced in DataService.revokeNodeAccess itself, so it
@@ -128,28 +128,28 @@ const onConnection = (socket, module) => {
 			});
 			disconnectNodeUser(nodeId, revoked?.id);
 			module.eventEmitter.emit('nodes:updated', { userIds: affected });
-			ack({ ok: true });
+			ack({ status: 'succeeded' });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 
 	socket.on('node:delete', async (config, ack = () => {}) => {
 		try {
 			if (!socket.isAuthenticated) {
-				ack({ ok: false, error: 'Authentication required' });
+				ack({ status: 'failed', message: 'Authentication required.' });
 				return;
 			}
 			const nodeId = String(config?.nodeId || '').trim();
 			if (!nodeId) {
-				ack({ ok: false, error: 'nodeId is required' });
+				ack({ status: 'failed', message: 'nodeId is required.' });
 				return;
 			}
 			const owner = await DataService.isNodeOwner(socket.userId, nodeId);
 			if (!owner) {
 				const allowed = await DataService.canUserAccessNode(socket.userId, nodeId);
 				if (!allowed) {
-					ack({ ok: false, error: 'Access denied for node' });
+					ack({ status: 'failed', message: 'Access denied for node.' });
 					return;
 				}
 				// An invited admin only detaches their own access; the node itself is untouched.
@@ -158,16 +158,16 @@ const onConnection = (socket, module) => {
 				await DataService.revokeNodeAccess({ email: socket.email, nodeId });
 				disconnectNodeUser(nodeId, socket.userId);
 				module.eventEmitter.emit('nodes:updated', { userIds: affected });
-				ack({ ok: true });
+				ack({ status: 'succeeded' });
 				return;
 			}
 
 			// The owner tears the node down: unregister an online node (wiping its own fleet
 			// config) then remove the fleet records and refresh the remaining members.
 			await module.teardownNode(nodeId);
-			ack({ ok: true });
+			ack({ status: 'succeeded' });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 
@@ -179,7 +179,7 @@ const onConnection = (socket, module) => {
 			const owner = await DataService.isNodeOwner(socket.userId, config.nodeId);
 			const groupManager = await DataService.isGroupManager(socket.userId, config.groupId);
 			if (!owner || !groupManager) {
-				ack({ ok: false, error: 'Only the node owner and a group manager can share a node with a group' });
+				ack({ status: 'failed', message: 'Only the node owner and a group manager can share a node with a group.' });
 				return;
 			}
 			await DataService.grantGroupNodeAccess({
@@ -195,9 +195,9 @@ const onConnection = (socket, module) => {
 			const affected = [...new Set([...nodeMembers, ...groupMembers])];
 			module.eventEmitter.emit('groups:updated');
 			module.eventEmitter.emit('nodes:updated', { userIds: affected });
-			ack({ ok: true });
+			ack({ status: 'succeeded' });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 };

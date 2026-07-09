@@ -10,5 +10,5 @@ export const authRateLimiter = rateLimit({
 	// The app runs behind a trusted reverse proxy (`trust proxy` is on), so the client IP comes
 	// from X-Forwarded-For; silence the limiter's permissive-trust-proxy validation.
 	validate: { trustProxy: false },
-	message: { ok: false, error: 'Too many attempts, please try again later.' }
+	message: { status: 'failed', message: 'Too many attempts, please try again later.' }
 });

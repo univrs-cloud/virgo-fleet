@@ -12,12 +12,12 @@ const onConnection = (socket, module) => {
 			const email = String(config?.email || '').trim().toLowerCase();
 			const password = String(config?.password || '');
 			if (!serialNumber || !email || !password) {
-				ack({ ok: false, error: 'serialNumber, email and password are required' });
+				ack({ status: 'failed', message: 'serialNumber, email and password are required.' });
 				return;
 			}
 			const owner = await DataService.verifyCredentials({ email, password });
 			if (!owner) {
-				ack({ ok: false, error: 'Invalid fleet credentials' });
+				ack({ status: 'failed', message: 'Invalid fleet credentials.' });
 				return;
 			}
 			const node = await DataService.upsertNode({
@@ -33,9 +33,9 @@ const onConnection = (socket, module) => {
 			socket.data.nodeId = serialNumber;
 			module.setNodeSocket(serialNumber, socket);
 			module.eventEmitter.emit('nodes:updated', { userIds: [owner.id] });
-			ack({ ok: true, nodeId: serialNumber, token: node.token });
+			ack({ status: 'succeeded', nodeId: serialNumber, token: node.token });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 };

@@ -7,7 +7,7 @@ const onConnection = (socket, module) => {
 				return;
 			}
 			if (!await DataService.isGroupManager(socket.userId, config.groupId)) {
-				ack({ ok: false, error: 'Only a group manager can update this group' });
+				ack({ status: 'failed', message: 'Only a group manager can update this group.' });
 				return;
 			}
 			await DataService.updateGroup({
@@ -16,9 +16,9 @@ const onConnection = (socket, module) => {
 				description: config.description
 			});
 			module.eventEmitter.emit('groups:updated');
-			ack({ ok: true, message: 'Group updated.' });
+			ack({ status: 'succeeded', message: 'Group updated.' });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 };

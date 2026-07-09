@@ -144,10 +144,10 @@ function handleHttpEnd({ requestId } = {}) {
 	pending.resolve();
 }
 
-function handleHttpError({ requestId, status, error } = {}) {
+function handleHttpError({ requestId, status, message } = {}) {
 	failPendingRequest(
 		requestId,
-		Object.assign(new Error(error || 'Asset fetch failed'), { status: status || 502 })
+		Object.assign(new Error(message || 'Asset fetch failed'), { status: status || 502 })
 	);
 }
 

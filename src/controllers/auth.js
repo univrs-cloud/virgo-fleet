@@ -9,9 +9,9 @@ async function signup(req, res) {
 			password: req.body?.password
 		});
 		setAuthCookies(res, req, { token: result.token, user: result.user });
-		res.json({ ok: true });
+		res.json({ status: 'succeeded' });
 	} catch (error) {
-		res.status(400).json({ ok: false, error: error.message });
+		res.status(400).json({ status: 'failed', message: error.message });
 	}
 }
 
@@ -22,9 +22,9 @@ async function login(req, res) {
 			password: req.body?.password
 		});
 		setAuthCookies(res, req, { token: result.token, user: result.user });
-		res.json({ ok: true });
+		res.json({ status: 'succeeded' });
 	} catch (error) {
-		res.status(401).json({ ok: false, error: error.message });
+		res.status(401).json({ status: 'failed', message: error.message });
 	}
 }
 
@@ -35,9 +35,9 @@ async function logout(req, res) {
 			await DataService.deleteSession(token);
 		}
 		clearAuthCookies(res, req);
-		res.json({ ok: true });
+		res.json({ status: 'succeeded' });
 	} catch (error) {
-		res.status(500).json({ ok: false, error: error.message });
+		res.status(500).json({ status: 'failed', message: error.message });
 	}
 }
 

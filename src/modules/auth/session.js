@@ -10,9 +10,9 @@ const onConnection = (socket, module) => {
 				password: config.password
 			});
 			module.eventEmitter.emit('users:updated');
-			ack({ ok: true, ...result });
+			ack({ status: 'succeeded', ...result });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 
@@ -22,9 +22,9 @@ const onConnection = (socket, module) => {
 				email: config.email,
 				password: config.password
 			});
-			ack({ ok: true, ...result });
+			ack({ status: 'succeeded', ...result });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 
@@ -34,9 +34,9 @@ const onConnection = (socket, module) => {
 			if (token) {
 				await DataService.deleteSession(token);
 			}
-			ack({ ok: true });
+			ack({ status: 'succeeded' });
 		} catch (error) {
-			ack({ ok: false, error: error.message });
+			ack({ status: 'failed', message: error.message });
 		}
 	});
 };
