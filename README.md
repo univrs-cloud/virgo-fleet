@@ -4,6 +4,12 @@
 ```
 CERTRESOLVER='le'
 DOMAIN='your.domain'
+SMTP_HOST='smtp.your.provider'
+SMTP_PORT='587'
+SMTP_SECURE='false'
+SMTP_USER='postmaster@your.domain'
+SMTP_PASS='your-smtp-password'
+SMTP_FROM='fleet@your.domain'
 ```
 
 docker-compose.yml
@@ -14,6 +20,13 @@ services:
     environment:
       - PUID=1000
       - PGID=100
+      - DOMAIN=${DOMAIN}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM}
     volumes:
       - /messier/apps/fleet/data:/data
     labels:

@@ -1,17 +1,42 @@
 import DataService from '../database/data_service.js';
 import { clearAuthCookies, getSessionTokenFromCookieHeader, setAuthCookies } from '../utils/auth_cookies.js';
+import { sendSignupVerificationEmail } from '../emails/signup_verification/index.js';
 
 async function signup(req, res) {
+	let pending = null;
 	try {
-		const result = await DataService.signup({
+		pending = await DataService.createPendingUser({
 			email: req.body?.email,
 			displayName: req.body?.displayName,
 			password: req.body?.password
 		});
-		setAuthCookies(res, req, { token: result.token, user: result.user });
-		res.json({ status: 'succeeded' });
+		await sendSignupVerificationEmail({
+			to: pending.email,
+			displayName: pending.displayName,
+			token: pending.token
+		});
+		// No auth cookies here: the account is not usable until the emailed link is clicked.
+		res.json({ status: 'succeeded', email: pending.email });
 	} catch (error) {
+		// If we created the pending row but the email never went out, drop it so the user can
+		// retry immediately instead of hitting "a link was already sent" limbo.
+		if (pending) {
+			await DataService.deletePendingUser(pending.email).catch(() => {});
+		}
 		res.status(400).json({ status: 'failed', message: error.message });
+	}
+}
+
+// Landing point for the link in the verification email. On success the account is promoted
+// and logged in via cookies, then redirected into the app; on failure it redirects back to
+// the login screen with a flag the UI can surface.
+async function verify(req, res) {
+	try {
+		const result = await DataService.verifyPendingUser(req.query?.token);
+		setAuthCookies(res, req, { token: result.token, user: result.user });
+		res.redirect('/');
+	} catch (error) {
+		res.redirect(`/?verify=failed&reason=${encodeURIComponent(error.message)}`);
 	}
 }
 
@@ -43,6 +68,7 @@ async function logout(req, res) {
 
 export {
 	signup,
+	verify,
 	login,
 	logout
 };

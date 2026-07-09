@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Load .env before anything reads process.env (SMTP + APP_URL for email verification). In the
+// container these come from real environment variables and .env is simply absent.
+import 'dotenv/config';
 import config from './config.js';
 import createApp from './src/app.js';
 import createServer from './src/server.js';

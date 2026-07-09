@@ -3,18 +3,22 @@ import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { sequelize } from './index.js';
 import {
+	Node,
+	NodeAccess,
+	FleetSession,
+	FleetPendingUser,
 	FleetUser,
 	FleetGroup,
-	Node,
-	FleetSession,
 	FleetUserGroup,
-	NodeAccess,
 	GroupNodeAccess
 } from './models/associations.js';
 import { normalizeEmail } from '../utils/email.js';
 
 const PASSWORD_COST = 12;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+// A verification link is only good for 30 minutes; after that the pending row is dead weight
+// and re-registering the same email issues a fresh one.
+const PENDING_TTL_MS = 1000 * 60 * 30;
 
 function toPublicUser(user) {
 	if (!user) {
@@ -183,17 +187,81 @@ class DataService {
 		};
 	}
 
-	static async signup({ email, displayName, password }) {
-		const user = await this.createUser({
-			email,
-			displayName,
-			password
+	// Registers an account into the pending table and returns the verification token so the
+	// caller can email it. No fleet_users row and no session are created here — the account
+	// does not exist for login purposes until the link is clicked.
+	static async createPendingUser({ email, displayName, password }) {
+		const normalizedEmail = normalizeEmail(email);
+		if (!normalizedEmail || !password) {
+			throw new Error('email and password are required.');
+		}
+		// A verified account already owns this email — registration must not shadow it.
+		const existing = await this.getUserByEmail(normalizedEmail);
+		if (existing) {
+			throw new Error('User already exists.');
+		}
+		// Housekeeping: drop pending rows whose links have already lapsed so the table doesn't
+		// accumulate dead registrations.
+		await FleetPendingUser.destroy({ where: { expiresAt: { [Op.lt]: new Date() } } });
+		const token = randomBytes(48).toString('hex');
+		const expiresAt = new Date(Date.now() + PENDING_TTL_MS);
+		// Upsert keyed on the unique email: a repeat signup before verification (e.g. the first
+		// email never arrived) overwrites the pending row in place, issuing a fresh token and
+		// expiry and invalidating the previous link.
+		await FleetPendingUser.upsert({
+			email: normalizedEmail,
+			displayName: displayName || normalizedEmail,
+			passwordHash: bcrypt.hashSync(password, PASSWORD_COST),
+			verificationToken: token,
+			expiresAt
 		});
-		const dbUser = await this.getUserByEmail(user.email);
-		const session = await this.createSession(dbUser.id);
+		return { email: normalizedEmail, displayName: displayName || normalizedEmail, token, expiresAt };
+	}
+
+	static async deletePendingUser(email) {
+		const normalizedEmail = normalizeEmail(email);
+		if (!normalizedEmail) {
+			return false;
+		}
+		await FleetPendingUser.destroy({ where: { email: normalizedEmail } });
+		return true;
+	}
+
+	// Promotes a pending account into fleet_users and logs it in. The move and the pending-row
+	// deletion run in one transaction so a verified account can never exist in both tables.
+	static async verifyPendingUser(token) {
+		if (!token) {
+			throw new Error('This verification link is invalid or has expired.');
+		}
+		const pending = await FleetPendingUser.findOne({
+			where: {
+				verificationToken: token,
+				expiresAt: { [Op.gt]: new Date() }
+			}
+		});
+		if (!pending) {
+			throw new Error('This verification link is invalid or has expired.');
+		}
+		// Guard the race where the same email got verified through another link in the meantime.
+		const existing = await this.getUserByEmail(pending.email);
+		if (existing) {
+			await pending.destroy();
+			throw new Error('User already exists.');
+		}
+		const user = await sequelize.transaction(async (transaction) => {
+			const created = await FleetUser.create({
+				email: pending.email,
+				displayName: pending.displayName,
+				// Reuse the hash captured at registration — the password is never re-collected.
+				passwordHash: pending.passwordHash
+			}, { transaction });
+			await pending.destroy({ transaction });
+			return created;
+		});
+		const session = await this.createSession(user.id);
 		return {
 			...session,
-			user
+			user: toPublicUser(user)
 		};
 	}
 

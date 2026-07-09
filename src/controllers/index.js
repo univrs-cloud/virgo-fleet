@@ -9,6 +9,7 @@ const router = express.Router();
 router.post('/auth/signup', authController.signup);
 router.post('/auth/login', authController.login);
 router.post('/auth/logout', authController.logout);
+router.get('/auth/verify', authController.verify);
 router.get('/nodes/:nodeId', nodeContentController.serveNodeContent);
 router.get('/nodes/:nodeId/*rest', nodeContentController.serveNodeContent);
 router.use('/', staticController.staticMiddleware);

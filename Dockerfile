@@ -26,4 +26,23 @@ VOLUME ["/data"]
 
 EXPOSE 3000
 
+# Email verification (signup) configuration. Provide real values at runtime via
+# `docker run -e` / compose `environment:` — these declarations only document the contract
+# and give safe empty defaults; secrets must never be baked into the image.
+#   DOMAIN       base domain; the verification link is built as https://fleet.$DOMAIN,
+#                matching the Traefik Host(`fleet.$DOMAIN`) route
+#   SMTP_HOST    SMTP relay hostname
+#   SMTP_PORT    SMTP port (587 for STARTTLS, 465 for implicit TLS)
+#   SMTP_SECURE  "true" for implicit TLS (port 465), otherwise STARTTLS is used
+#   SMTP_USER    SMTP username (optional if the relay accepts unauthenticated mail)
+#   SMTP_PASS    SMTP password
+#   SMTP_FROM    From address for verification emails (defaults to SMTP_USER)
+ENV DOMAIN="" \
+    SMTP_HOST="" \
+    SMTP_PORT="587" \
+    SMTP_SECURE="false" \
+    SMTP_USER="" \
+    SMTP_PASS="" \
+    SMTP_FROM=""
+
 CMD ["node", "index.js"]

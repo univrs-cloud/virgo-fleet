@@ -15,7 +15,7 @@ function createApp() {
 	app.use(helmet({ contentSecurityPolicy: false }));
 	app.use(express.json());
 	// Throttle the credential endpoints to blunt brute-force / credential-stuffing.
-	app.use(['/auth/login', '/auth/signup'], authRateLimiter);
+	app.use(['/auth/login', '/auth/signup', '/auth/verify'], authRateLimiter);
 	app.use(authCookieHandler);
 	app.use(controllers);
 	app.use(error404Handler);

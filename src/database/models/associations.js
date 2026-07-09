@@ -1,7 +1,8 @@
-import FleetUser from './FleetUser.js';
-import FleetGroup from './FleetGroup.js';
 import Node from './Node.js';
 import FleetSession from './FleetSession.js';
+import FleetPendingUser from './FleetPendingUser.js';
+import FleetUser from './FleetUser.js';
+import FleetGroup from './FleetGroup.js';
 import { sequelize } from '../index.js';
 import { DataTypes } from 'sequelize';
 
@@ -55,6 +56,7 @@ export {
 	FleetGroup,
 	Node,
 	FleetSession,
+	FleetPendingUser,
 	FleetUserGroup,
 	NodeAccess,
 	GroupNodeAccess
