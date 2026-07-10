@@ -4,6 +4,7 @@
 ```
 CERTRESOLVER='le'
 DOMAIN='your.domain'
+DB_PASSWORD='your-db-password'
 SMTP_HOST='smtp.your.provider'
 SMTP_PORT='587'
 SMTP_SECURE='false'
@@ -60,7 +61,7 @@ services:
       - POSTGRES_USER=${DB_USER:-fleet}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
-      - /messier/apps/fleet/db:/var/lib/postgresql/data
+      - /messier/apps/fleet/db:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-fleet} -d ${DB_NAME:-fleet}"]
       interval: 5s
