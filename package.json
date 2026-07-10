@@ -6,8 +6,7 @@
 	"license": "UNLICENSED",
 	"main": "index.js",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1",
-		"migrate:pg": "node scripts/migrate-sqlite-to-postgres.js"
+		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"engines": {
 		"node": ">=24.13.0",
@@ -30,15 +29,11 @@
 		"pg": "^8.22.0",
 		"pg-hstore": "^2.3.4",
 		"sequelize": "^6.37.8",
-		"socket.io": "^4.8.3",
-		"sqlite3": "^6.0.1"
+		"socket.io": "^4.8.3"
 	},
 	"overrides": {
 		"glob": "^13.0.0",
 		"node-gyp": "^12.1.0",
 		"validator": "^13.15.23"
-	},
-	"allowScripts": {
-		"sqlite3@6.0.1": true
 	}
 }
