@@ -1,4 +1,6 @@
-FROM --platform=linux/arm64 debian:trixie-slim
+# Set the target at build time:
+#   docker buildx build --platform linux/arm64 -t <tag> .
+FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -34,8 +36,7 @@ EXPOSE 3000
 #   DB_POOL_MAX  max pooled connections (default 10)
 ENV DB_HOST="db" \
     DB_NAME="fleet" \
-    DB_USER="fleet" \
-    DB_PASSWORD=""
+    DB_USER="fleet"
 
 # Email verification (signup) configuration. Provide real values at runtime via
 # `docker run -e` / compose `environment:` — these declarations only document the contract
@@ -53,7 +54,6 @@ ENV DOMAIN="" \
     SMTP_PORT="587" \
     SMTP_SECURE="false" \
     SMTP_USER="" \
-    SMTP_PASS="" \
     SMTP_FROM=""
 
 CMD ["node", "index.js"]
