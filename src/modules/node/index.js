@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { registerFleetProxy, disconnectNodeClients } from '../../utils/node_proxy.js';
-import { registerNodeSocketGetter, attachNodeAssetHandler } from '../../utils/node_assets.js';
+import { registerNodeSocketGetter, attachNodeAssetHandler, failPendingRequestsForNode } from '../../utils/node_assets.js';
 import eventEmitter from '../../utils/event_emitter.js';
 import * as socket from '../../socket.js';
 import DataService from '../../database/data_service.js';
@@ -105,6 +105,9 @@ class NodeModule {
 				if (nodeId && nodeSocketsByNodeId.get(nodeId) === socket) {
 					nodeSocketsByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
+					// Node's gone: release any in-flight asset requests (and their buffers) now rather
+					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.
+					failPendingRequestsForNode(nodeId);
 					this.#broadcastNodeStatus(nodeId, false);
 					DataService.touchNodeLastSeen(nodeId).then(async () => {
 						const userIds = await DataService.listNodeMemberUserIds(nodeId);

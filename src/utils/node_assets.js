@@ -3,6 +3,11 @@ import { randomUUID } from 'crypto';
 const INITIAL_TIMEOUT_MS = 15000;
 const CHUNK_TIMEOUT_MS = 30000;
 const MAX_TRANSFER_MS = 300000;
+// Upper bound on a fully-buffered asset (fetchNodeAsset). Only documents are buffered — static
+// assets stream — but a node is a remote agent, so cap accumulation to stop a misbehaving or
+// compromised node from exhausting server memory by streaming an oversized "document". The HTML
+// shell is only kilobytes, so 1 MB is generous while keeping the per-request worst case small.
+const MAX_BUFFERED_ASSET_BYTES = 1 * 1024 * 1024;
 
 const pendingHttpRequests = new Map();
 
@@ -46,6 +51,18 @@ function failPendingRequest(requestId, error) {
 	clearPendingRequest(requestId);
 	abortNodeHttpRequest(nodeId, requestId);
 	pending.reject(error);
+}
+
+/** Fails every in-flight asset request bound to a node. Called when the node's socket drops so the
+ * requests (and any buffers/timers they hold) are released immediately instead of lingering until
+ * their own timeouts fire — up to MAX_TRANSFER_MS later. Safe to delete entries while iterating:
+ * Map iteration tolerates removal of visited/current keys. */
+function failPendingRequestsForNode(nodeId) {
+	for (const [requestId, pending] of pendingHttpRequests) {
+		if (pending.nodeId === nodeId) {
+			failPendingRequest(requestId, Object.assign(new Error('Node disconnected'), { status: 503 }));
+		}
+	}
 }
 
 function resetChunkTimeout(requestId) {
@@ -230,6 +247,7 @@ function writeChunkWithBackpressure(res, chunk) {
 
 async function fetchNodeAsset(nodeId, assetPath) {
 	const chunks = [];
+	let bufferedBytes = 0;
 	const result = {
 		status: 502,
 		contentType: 'application/octet-stream',
@@ -241,7 +259,13 @@ async function fetchNodeAsset(nodeId, assetPath) {
 			result.status = status;
 			result.contentType = headers['content-type'] || result.contentType;
 		},
-		onChunk: (chunk) => {
+		// async so a thrown cap error surfaces as a rejected promise that handleHttpChunk's
+		// .catch turns into failPendingRequest, rather than a synchronous throw in the event handler.
+		onChunk: async (chunk) => {
+			bufferedBytes += chunk.length;
+			if (bufferedBytes > MAX_BUFFERED_ASSET_BYTES) {
+				throw Object.assign(new Error('Document exceeds maximum buffered size'), { status: 502 });
+			}
 			chunks.push(chunk);
 		},
 		onEnd: () => {
@@ -275,6 +299,7 @@ async function streamNodeAsset(nodeId, assetPath, res, { cacheControl } = {}) {
 export {
 	registerNodeSocketGetter,
 	attachNodeAssetHandler,
+	failPendingRequestsForNode,
 	fetchNodeAsset,
 	streamNodeAsset
 };
