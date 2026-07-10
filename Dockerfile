@@ -22,9 +22,20 @@ RUN npm ci --omit=dev
 
 COPY . .
 
-VOLUME ["/data"]
-
 EXPOSE 3000
+
+# Database connection. State lives in Postgres now (the sqlite /data volume is gone); provide real
+# values at runtime via compose `environment:`. Defaults match the compose `db` service.
+#   DB_HOST      Postgres hostname (the compose service name, e.g. "db")
+#   DB_PORT      Postgres port (optional; defaults to 5432)
+#   DB_NAME      database name
+#   DB_USER      database user
+#   DB_PASSWORD  database password
+#   DB_POOL_MAX  max pooled connections (default 10)
+ENV DB_HOST="db" \
+    DB_NAME="fleet" \
+    DB_USER="fleet" \
+    DB_PASSWORD=""
 
 # Email verification (signup) configuration. Provide real values at runtime via
 # `docker run -e` / compose `environment:` — these declarations only document the contract

@@ -18,17 +18,17 @@ services:
   fleet:
     image: ghcr.io/univrs-cloud/virgo-fleet:latest
     environment:
-      - PUID=1000
-      - PGID=100
       - DOMAIN=${DOMAIN}
+      - DB_HOST=db
+      - DB_NAME=${DB_NAME:-fleet}
+      - DB_USER=${DB_USER:-fleet}
+      - DB_PASSWORD=${DB_PASSWORD}
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_SECURE=${SMTP_SECURE:-false}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
       - SMTP_FROM=${SMTP_FROM}
-    volumes:
-      - /messier/apps/fleet/data:/data
     labels:
       - "traefik.enable=true"
       - "traefik.docker.allowNonRunning=true"
@@ -39,7 +39,11 @@ services:
       - "traefik.http.routers.fleet.tls.certresolver=${CERTRESOLVER:+${CERTRESOLVER}}"
       - "traefik.http.routers.fleet.middlewares=secure-headers@file"
     networks:
+      - internal
       - virgo
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     # Each connected node holds a control socket open; the default 1024 fd limit is exhausted
     # well before a few hundred nodes (plus proxied user sessions). Raise it so the accept path
@@ -49,7 +53,26 @@ services:
         soft: 65536
         hard: 65536
 
+  db:
+    image: postgres:18-alpine
+    environment:
+      - POSTGRES_DB=${DB_NAME:-fleet}
+      - POSTGRES_USER=${DB_USER:-fleet}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - /messier/apps/fleet/db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-fleet} -d ${DB_NAME:-fleet}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+    restart: unless-stopped
+
 networks:
+  internal:
+    internal: true
   virgo:
     external: true
 ```

@@ -1,0 +1,15 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+# JS/JSON in this repo is tab-indented; keep that as the default.
+indent_style = tab
+
+# YAML forbids tab indentation, and Markdown fenced YAML (the compose in README.md) is parsed as
+# YAML too — force spaces here so an auto-indent tab can't break a deploy.
+[*.{yml,yaml,md}]
+indent_style = space
+indent_size = 2
