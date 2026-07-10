@@ -41,6 +41,13 @@ services:
     networks:
       - virgo
     restart: unless-stopped
+    # Each connected node holds a control socket open; the default 1024 fd limit is exhausted
+    # well before a few hundred nodes (plus proxied user sessions). Raise it so the accept path
+    # doesn't hit EMFILE during a reconnect storm.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
 networks:
   virgo:

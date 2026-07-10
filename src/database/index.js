@@ -1,12 +1,13 @@
 import { Sequelize } from 'sequelize';
 
-// Defaults to the mounted /data volume; DB_PATH lets tests (and alternate deployments) point
-// the SQLite file elsewhere without touching the code.
-const dbPath = process.env.DB_PATH || '/data/virgo.db';
 const sequelize = new Sequelize({
 	dialect: 'sqlite',
-	storage: dbPath,
+	storage: '/data/virgo.db',
 	logging: false
 });
+
+await sequelize.query('PRAGMA journal_mode = WAL;');
+await sequelize.query('PRAGMA busy_timeout = 5000;');
+await sequelize.query('PRAGMA synchronous = NORMAL;');
 
 export { sequelize };
