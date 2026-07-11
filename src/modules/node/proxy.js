@@ -1,6 +1,6 @@
 import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
-import { disconnectNodeUser } from '../../utils/node_proxy.js';
+import { disconnectNodeUser, revokeStaleNodeAccess } from '../../utils/node_proxy.js';
 
 const emitNodes = async (socket, module) => {
 	try {
@@ -15,9 +15,13 @@ const emitNodes = async (socket, module) => {
 			};
 			if (node.isOwner) {
 				const members = await DataService.listNodeMembers(node.nodeId);
+				// Direct invites only; groups the node is shared with go in their own key so the owner
+				// can tell them apart and revoke each with the right action (node:revoke vs
+				// group:node:remove).
 				entry.admins = (members.users || [])
 					.filter((user) => { return user.role !== 'owner'; })
 					.map((user) => { return { email: user.email, displayName: user.displayName }; });
+				entry.groups = (members.groups || []).map((group) => { return { id: group.id, name: group.name }; });
 			}
 			return entry;
 		}));
@@ -88,8 +92,17 @@ const onConnection = (socket, module) => {
 				ack({ status: 'failed', message: 'The node owner already has access.' });
 				return;
 			}
-			if (await DataService.canUserAccessNode(invitee.id, nodeId)) {
-				ack({ status: 'failed', message: 'This account already has access.' });
+			// One lookup tells us both whether they already have access and how (direct vs a group
+			// share), so the message can point the owner at the right fix instead of a generic refusal.
+			const existingAccess = (await DataService.listAccessibleNodes(invitee.id))
+				.find((accessibleNode) => { return accessibleNode.nodeId === nodeId; });
+			if (existingAccess) {
+				ack({
+					status: 'failed',
+					message: existingAccess.access === 'group'
+						? 'This account already has access to this node through a group it belongs to. Revoke the group’s access to this node instead of inviting directly.'
+						: 'This account already has access.'
+				});
 				return;
 			}
 			await DataService.grantNodeAccess({
@@ -192,12 +205,47 @@ const onConnection = (socket, module) => {
 				groupId: config.groupId,
 				nodeId: config.nodeId
 			});
+			// A direct admin who is also in this group now has redundant access; collapse their direct
+			// grant into the group so access is represented once. Admins not in the group keep theirs.
+			await DataService.collapseDirectAdminsIntoGroup(config.nodeId, config.groupId);
 			// Sharing a node with a group changes the accessible-node list for the node's own
 			// members and everyone in the group, so refresh exactly those users.
 			const [nodeMembers, groupMembers] = await Promise.all([
 				DataService.listNodeMemberUserIds(config.nodeId),
 				DataService.listGroupMemberUserIds(config.groupId)
 			]);
+			const affected = [...new Set([...nodeMembers, ...groupMembers])];
+			module.eventEmitter.emit('groups:updated');
+			module.eventEmitter.emit('nodes:updated', { userIds: affected });
+			ack({ status: 'succeeded' });
+		} catch (error) {
+			ack({ status: 'failed', message: error.message });
+		}
+	});
+
+	socket.on('group:node:remove', async (config, ack = () => {}) => {
+		try {
+			if (!socket.isAuthenticated) {
+				return;
+			}
+			const owner = await DataService.isNodeOwner(socket.userId, config.nodeId);
+			const groupManager = await DataService.isGroupManager(socket.userId, config.groupId);
+			// Either stakeholder can un-share: the node owner (it's their node) or a group manager
+			// (it's their group). Sharing needs both, but removal shouldn't require the counterparty.
+			if (!owner && !groupManager) {
+				ack({ status: 'failed', message: 'Only the node owner or a group manager can un-share a node from a group.' });
+				return;
+			}
+			// Capture the group's members before removing the share, then enforce: members who lose
+			// their only path to the node have their live proxy sessions torn down (access is
+			// otherwise only checked at connect) and their inventory refreshed so the node disappears.
+			const groupMembers = await DataService.listGroupMemberUserIds(config.groupId);
+			await DataService.revokeGroupNodeAccess({
+				groupId: config.groupId,
+				nodeId: config.nodeId
+			});
+			await revokeStaleNodeAccess(groupMembers, [config.nodeId]);
+			const nodeMembers = await DataService.listNodeMemberUserIds(config.nodeId);
 			const affected = [...new Set([...nodeMembers, ...groupMembers])];
 			module.eventEmitter.emit('groups:updated');
 			module.eventEmitter.emit('nodes:updated', { userIds: affected });

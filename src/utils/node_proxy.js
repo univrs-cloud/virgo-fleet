@@ -148,8 +148,31 @@ function disconnectNodeUser(nodeId, userId) {
 	}
 }
 
+/** Enforces access after a group membership/share change (removal, group deletion). For each of the
+ * given users, re-evaluates access to each node and tears down any live proxy session to a node they
+ * can no longer reach. Access is otherwise only checked at namespace-connect, so without this a
+ * revoked user keeps an open session — and full device control — until they happen to disconnect.
+ * Users who still hold another path (a direct grant or another group) keep their sessions. Must be
+ * called AFTER the DB change so the re-check reflects the new state. */
+async function revokeStaleNodeAccess(userIds, nodeIds) {
+	if (!userIds.length || !nodeIds.length) {
+		return;
+	}
+	for (const userId of userIds) {
+		const stillAccessible = new Set(
+			(await DataService.listAccessibleNodes(userId)).map((node) => { return node.nodeId; })
+		);
+		for (const nodeId of nodeIds) {
+			if (!stillAccessible.has(nodeId)) {
+				disconnectNodeUser(nodeId, userId);
+			}
+		}
+	}
+}
+
 export {
 	registerFleetProxy,
 	disconnectNodeClients,
-	disconnectNodeUser
+	disconnectNodeUser,
+	revokeStaleNodeAccess
 };

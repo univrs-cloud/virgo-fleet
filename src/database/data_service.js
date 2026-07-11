@@ -333,6 +333,18 @@ class DataService {
 		return (group.FleetUsers || []).map((user) => { return user.id; });
 	}
 
+	/** String nodeIds of the nodes a group grants access to (via GroupNodeAccess). Captured before a
+	 * group membership/existence change so access to those nodes can be re-evaluated and enforced. */
+	static async listGroupNodeIds(groupId) {
+		const group = await FleetGroup.findByPk(groupId, {
+			include: [{ model: Node, attributes: ['nodeId'], through: { attributes: [] } }]
+		});
+		if (!group) {
+			return [];
+		}
+		return (group.Nodes || []).map((node) => { return node.nodeId; });
+	}
+
 	static async createGroup({ name, description, createdByUserId }) {
 		const normalizedName = String(name || '').trim();
 		if (!normalizedName) {
@@ -502,6 +514,45 @@ class DataService {
 		return true;
 	}
 
+	static async revokeGroupNodeAccess({ groupId, nodeId }) {
+		const group = await FleetGroup.findByPk(groupId);
+		const node = await Node.findOne({ where: { nodeId } });
+		if (!group || !node) {
+			throw new Error('Group or node not found.');
+		}
+		await group.removeNode(node);
+		return true;
+	}
+
+	/** After a node is shared with a group, collapse redundant direct grants: a user who was an
+	 * invited admin AND is a member of that group now reaches the node through the group, so their
+	 * direct NodeAccess row is dropped and their access is represented once (by the group). The owner
+	 * row is never touched, and admins who are NOT in the group keep their direct grant. No one loses
+	 * access — the group still covers the removed users — so no session teardown is needed. Returns
+	 * the ids of users whose direct grant was collapsed. */
+	static async collapseDirectAdminsIntoGroup(nodeId, groupId) {
+		const [node, group] = await Promise.all([
+			Node.findOne({
+				where: { nodeId },
+				include: [{ model: FleetUser, attributes: ['id'], through: { attributes: ['role'] } }]
+			}),
+			FleetGroup.findByPk(groupId, {
+				include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+			})
+		]);
+		if (!node || !group) {
+			return [];
+		}
+		const groupMemberIds = new Set((group.FleetUsers || []).map((user) => { return user.id; }));
+		const redundant = (node.FleetUsers || []).filter((user) => {
+			return user.id !== node.ownerUserId && user.NodeAccess?.role !== 'owner' && groupMemberIds.has(user.id);
+		});
+		if (redundant.length) {
+			await node.removeFleetUsers(redundant);
+		}
+		return redundant.map((user) => { return user.id; });
+	}
+
 	static async listAccessibleNodes(userId) {
 		const user = await FleetUser.findByPk(userId, {
 			include: [{
@@ -579,7 +630,7 @@ class DataService {
 				};
 			}),
 			groups: (plain.FleetGroups || []).map((group) => {
-				return { name: group.name };
+				return { id: group.id, name: group.name };
 			})
 		};
 	}

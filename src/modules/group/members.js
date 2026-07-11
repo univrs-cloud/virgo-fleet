@@ -1,5 +1,6 @@
 import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
+import { revokeStaleNodeAccess } from '../../utils/node_proxy.js';
 
 const onConnection = (socket, module) => {
 	socket.on('group:user:add', async (config, ack = () => {}) => {
@@ -43,10 +44,19 @@ const onConnection = (socket, module) => {
 				ack({ status: 'failed', message: 'email is required.' });
 				return;
 			}
+			// Capture the user and the group's shared nodes before the removal, then enforce: any live
+			// proxy session to a node the user can no longer reach is torn down (access is otherwise
+			// only checked at connect time), and their inventory is refreshed so the node disappears.
+			const removed = await DataService.getUserByEmail(email);
+			const groupNodeIds = await DataService.listGroupNodeIds(config.groupId);
 			await DataService.removeUserFromGroup({
 				groupId: config.groupId,
 				email
 			});
+			if (removed) {
+				await revokeStaleNodeAccess([removed.id], groupNodeIds);
+				module.eventEmitter.emit('nodes:updated', { userIds: [removed.id] });
+			}
 			module.eventEmitter.emit('groups:updated');
 			module.eventEmitter.emit('users:updated');
 			ack({ status: 'succeeded', message: `User ${email} removed from group.` });
