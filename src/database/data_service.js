@@ -616,11 +616,13 @@ class DataService {
 
 	/** User ids whose accessible-node inventory changes when `userId` is deleted, so the nodes:updated
 	 * broadcast can target exactly them instead of every connected user. Must be computed BEFORE the
-	 * deletion, because the DB cascade removes the rows it derives from. Two affected sets:
+	 * deletion, because the DB cascade removes the rows it derives from. Three affected sets:
 	 *  - everyone who can currently see a node this user owns — owner + directly-invited members +
 	 *    members of any group the node is shared with (the owned nodes are cascade-deleted);
 	 *  - members of every group this user created — those groups cascade away too, dropping the nodes
-	 *    they shared with the members.
+	 *    they shared with the members;
+	 *  - the owners of nodes this user is an invited admin on — an owner's inventory lists their node's
+	 *    admins, so removing this user changes that list and the owner must be refreshed.
 	 * The user themselves is excluded: they're being removed, so there's nothing to refresh. */
 	static async listUsersAffectedByUserDeletion(userId) {
 		if (!userId) {
@@ -660,6 +662,25 @@ class DataService {
 		for (const group of createdGroups) {
 			for (const user of group.FleetUsers || []) {
 				affected.add(user.id);
+			}
+		}
+
+		// Nodes this user is a direct member of (owns or is an invited admin on). The owner's inventory
+		// lists the node's admins, so this user leaving changes it — refresh those owners. (Owned nodes
+		// resolve to this user's own id and drop out below; group-only access never appears in an
+		// admins list, so it isn't relevant here.)
+		const memberNodes = await Node.findAll({
+			attributes: ['ownerUserId'],
+			include: [{
+				model: FleetUser,
+				attributes: [],
+				through: { attributes: [] },
+				where: { id: userId }
+			}]
+		});
+		for (const node of memberNodes) {
+			if (node.ownerUserId) {
+				affected.add(node.ownerUserId);
 			}
 		}
 
