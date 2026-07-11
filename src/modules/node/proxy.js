@@ -32,6 +32,7 @@ const emitNodes = async (socket, module) => {
  * users whose inventory actually changed are refreshed; otherwise every connected user is refreshed. */
 const broadcastNodes = async (module, affectedUserIds) => {
 	const targeted = Array.isArray(affectedUserIds) ? new Set(affectedUserIds) : null;
+	const recipients = [];
 	for (const socket of module.nsp.sockets.values()) {
 		if (socket.data?.role !== 'user' || !socket.isAuthenticated) {
 			continue;
@@ -39,8 +40,13 @@ const broadcastNodes = async (module, affectedUserIds) => {
 		if (targeted && !targeted.has(socket.userId)) {
 			continue;
 		}
-		await emitNodes(socket, module);
+		recipients.push(socket);
 	}
+	// Fan out concurrently rather than one round-trip at a time: an untargeted refresh (e.g. a user
+	// deletion) otherwise serializes into one emitNodes per connected user, and each emitNodes is
+	// several queries — hundreds of sequential round-trips that freeze the broadcast. emitNodes
+	// swallows its own errors, and the Sequelize pool caps how many queries actually run at once.
+	await Promise.all(recipients.map((socket) => emitNodes(socket, module)));
 };
 
 const register = (module) => {

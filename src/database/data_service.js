@@ -614,6 +614,59 @@ class DataService {
 		return nodes.map((node) => { return node.nodeId; });
 	}
 
+	/** User ids whose accessible-node inventory changes when `userId` is deleted, so the nodes:updated
+	 * broadcast can target exactly them instead of every connected user. Must be computed BEFORE the
+	 * deletion, because the DB cascade removes the rows it derives from. Two affected sets:
+	 *  - everyone who can currently see a node this user owns — owner + directly-invited members +
+	 *    members of any group the node is shared with (the owned nodes are cascade-deleted);
+	 *  - members of every group this user created — those groups cascade away too, dropping the nodes
+	 *    they shared with the members.
+	 * The user themselves is excluded: they're being removed, so there's nothing to refresh. */
+	static async listUsersAffectedByUserDeletion(userId) {
+		if (!userId) {
+			return [];
+		}
+		const affected = new Set();
+
+		const ownedNodes = await Node.findAll({
+			where: { ownerUserId: userId },
+			include: [
+				{ model: FleetUser, attributes: ['id'], through: { attributes: [] } },
+				{
+					model: FleetGroup,
+					attributes: ['id'],
+					include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+				}
+			]
+		});
+		for (const node of ownedNodes) {
+			if (node.ownerUserId) {
+				affected.add(node.ownerUserId);
+			}
+			for (const user of node.FleetUsers || []) {
+				affected.add(user.id);
+			}
+			for (const group of node.FleetGroups || []) {
+				for (const user of group.FleetUsers || []) {
+					affected.add(user.id);
+				}
+			}
+		}
+
+		const createdGroups = await FleetGroup.findAll({
+			where: { createdByUserId: userId },
+			include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+		});
+		for (const group of createdGroups) {
+			for (const user of group.FleetUsers || []) {
+				affected.add(user.id);
+			}
+		}
+
+		affected.delete(userId);
+		return [...affected];
+	}
+
 	static async deleteNode(nodeId) {
 		const node = await Node.findOne({ where: { nodeId } });
 		if (!node) {

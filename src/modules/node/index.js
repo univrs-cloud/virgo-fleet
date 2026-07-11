@@ -85,10 +85,7 @@ class NodeModule {
 		this.#nsp.on('connection', (socket) => {
 			if (socket.data?.role === 'node' && socket.data?.nodeId) {
 				this.setNodeSocket(socket.data.nodeId, socket);
-				DataService.touchNodeLastSeen(socket.data.nodeId).then(async () => {
-					const userIds = await DataService.listNodeMemberUserIds(socket.data.nodeId);
-					this.eventEmitter.emit('nodes:updated', { userIds });
-				});
+				this.#handleNodePresence(socket.data.nodeId, true);
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
 				emitNodes(socket, this).catch((error) => {
@@ -108,11 +105,7 @@ class NodeModule {
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.
 					failPendingRequestsForNode(nodeId);
-					this.#broadcastNodeStatus(nodeId, false);
-					DataService.touchNodeLastSeen(nodeId).then(async () => {
-						const userIds = await DataService.listNodeMemberUserIds(nodeId);
-						this.eventEmitter.emit('nodes:updated', { userIds });
-					});
+					this.#handleNodePresence(nodeId, false);
 				}
 			});
 		});
@@ -139,16 +132,26 @@ class NodeModule {
 		}
 	}
 
-	async #broadcastNodeStatus(nodeId, online) {
+	/** A single membership lookup drives both the per-user node:status push and the nodes:updated
+	 * refresh when a node comes online / goes offline — previously each connect and disconnect
+	 * queried listNodeMemberUserIds twice for the same nodeId. touchNodeLastSeen is an independent
+	 * write, so it runs alongside without gating the fan-out (and no longer risks an unhandled
+	 * rejection, which the old detached .then() chain did). */
+	async #handleNodePresence(nodeId, online) {
+		DataService.touchNodeLastSeen(nodeId).catch((error) => {
+			console.error('Error updating node last seen:', error);
+		});
 		try {
-			const memberIds = new Set(await DataService.listNodeMemberUserIds(nodeId));
+			const userIds = await DataService.listNodeMemberUserIds(nodeId);
+			const memberIds = new Set(userIds);
 			for (const socket of this.#nsp.sockets.values()) {
 				if (socket.data?.role === 'user' && socket.isAuthenticated && memberIds.has(socket.userId)) {
 					socket.emit('node:status', { nodeId, online });
 				}
 			}
+			this.eventEmitter.emit('nodes:updated', { userIds });
 		} catch (error) {
-			console.error('Error broadcasting node status:', error);
+			console.error('Error broadcasting node presence:', error);
 		}
 	}
 
@@ -164,7 +167,6 @@ class NodeModule {
 	setNodeSocket(nodeId, socket) {
 		nodeSocketsByNodeId.set(nodeId, socket);
 		attachNodeAssetHandler(socket);
-		this.#broadcastNodeStatus(nodeId, true);
 	}
 
 	isNodeOnline(nodeId) {
