@@ -665,11 +665,26 @@ class DataService {
 			}
 		}
 
-		// Nodes this user is a direct member of (owns or is an invited admin on). The owner's inventory
-		// lists the node's admins, so this user leaving changes it — refresh those owners. (Owned nodes
-		// resolve to this user's own id and drop out below; group-only access never appears in an
-		// admins list, so it isn't relevant here.)
-		const memberNodes = await Node.findAll({
+		// Owners of nodes this user is an invited admin on: their admins list reflects this user, so
+		// they must be refreshed when the user is removed. (Owned nodes are already covered above.)
+		for (const ownerId of await this.listNodeOwnersForMember(userId)) {
+			affected.add(ownerId);
+		}
+
+		affected.delete(userId);
+		return [...affected];
+	}
+
+	/** Owner ids of the nodes `userId` is an invited member of, excluding the user's own nodes. An
+	 * owner's inventory renders that node's admins list (each admin's email + displayName), so these
+	 * owners must be refreshed whenever the member changes in a way that list reflects — being removed
+	 * (deletion) or renamed (update). Group-only access never appears in an admins list, so members
+	 * reached only through a group share are intentionally excluded. */
+	static async listNodeOwnersForMember(userId) {
+		if (!userId) {
+			return [];
+		}
+		const nodes = await Node.findAll({
 			attributes: ['ownerUserId'],
 			include: [{
 				model: FleetUser,
@@ -678,14 +693,13 @@ class DataService {
 				where: { id: userId }
 			}]
 		});
-		for (const node of memberNodes) {
-			if (node.ownerUserId) {
-				affected.add(node.ownerUserId);
+		const owners = new Set();
+		for (const node of nodes) {
+			if (node.ownerUserId && node.ownerUserId !== userId) {
+				owners.add(node.ownerUserId);
 			}
 		}
-
-		affected.delete(userId);
-		return [...affected];
+		return [...owners];
 	}
 
 	static async deleteNode(nodeId) {
