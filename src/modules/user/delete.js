@@ -1,20 +1,9 @@
 import DataService from '../../database/data_service.js';
-import { normalizeEmail } from '../../utils/email.js';
 
+// A fleet user can only delete their own account: identity comes from the authenticated session,
+// never from client input, and no list of users is consulted.
 const deleteUser = async (config, socket, module) => {
-	const email = normalizeEmail(config.email);
-	if (!email) {
-		throw new Error('email is required.');
-	}
-	const user = module.toArray(module.getState('users')).find((entry) => {
-		return entry.email === email;
-	});
-	if (!user) {
-		throw new Error(`User ${email} not found.`);
-	}
-	if (socket.email !== email) {
-		throw new Error('Not allowed to delete this user.');
-	}
+	const email = socket.email;
 	// Capture both before deletion, since the DB cascade will remove the rows they derive from:
 	// the owned node ids (to tell those nodes to unregister afterwards), and the set of users whose
 	// node inventory changes (so the nodes:updated refresh targets exactly them, not every user).
@@ -25,7 +14,6 @@ const deleteUser = async (config, socket, module) => {
 		DataService.listUsersAffectedByUserDeletion(socket.userId)
 	]);
 	await DataService.deleteUser(email);
-	module.eventEmitter.emit('users:updated');
 	module.eventEmitter.emit('nodes:updated', { userIds: affectedUserIds });
 	module.eventEmitter.emit('groups:updated');
 	// Records are already gone; tell those nodes to unregister (wipe their own fleet config).

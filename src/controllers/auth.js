@@ -53,6 +53,42 @@ async function login(req, res) {
 	}
 }
 
+const MIN_PASSWORD_LENGTH = 8;
+
+// Self-service password change for the logged-in fleet user. This lives on HTTP (not a socket)
+// on purpose: DataService.changePassword invalidates every session, and only an HTTP response can
+// clear this browser's auth cookies in the same round-trip — leaving the UI cleanly logged out.
+async function changePassword(req, res) {
+	try {
+		const token = getSessionTokenFromCookieHeader(req.headers.cookie);
+		const session = token ? await DataService.getSessionByToken(token) : null;
+		const user = session?.FleetUser || null;
+		if (!user) {
+			res.status(401).json({ status: 'failed', message: 'Not authenticated.' });
+			return;
+		}
+		const currentPassword = req.body?.currentPassword;
+		const password = req.body?.password;
+		if (!currentPassword) {
+			throw new Error('Current password is required.');
+		}
+		if (!password || password.length < MIN_PASSWORD_LENGTH) {
+			throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+		}
+		// Prove the caller knows the current password before rehashing — a live session alone
+		// isn't enough to reset the credential.
+		const verified = await DataService.verifyCredentials({ email: user.email, password: currentPassword });
+		if (!verified) {
+			throw new Error('Current password is incorrect.');
+		}
+		await DataService.changePassword(user.email, password);
+		clearAuthCookies(res, req);
+		res.json({ status: 'succeeded' });
+	} catch (error) {
+		res.status(400).json({ status: 'failed', message: error.message });
+	}
+}
+
 async function logout(req, res) {
 	try {
 		const token = getSessionTokenFromCookieHeader(req.headers.cookie);
@@ -70,5 +106,6 @@ export {
 	signup,
 	verify,
 	login,
-	logout
+	logout,
+	changePassword
 };

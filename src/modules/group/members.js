@@ -23,7 +23,6 @@ const onConnection = (socket, module) => {
 				role: config.role || 'member'
 			});
 			module.eventEmitter.emit('groups:updated');
-			module.eventEmitter.emit('users:updated');
 			ack({ status: 'succeeded', message: `User ${email} added to group.` });
 		} catch (error) {
 			ack({ status: 'failed', message: error.message });
@@ -58,7 +57,6 @@ const onConnection = (socket, module) => {
 				module.eventEmitter.emit('nodes:updated', { userIds: [removed.id] });
 			}
 			module.eventEmitter.emit('groups:updated');
-			module.eventEmitter.emit('users:updated');
 			ack({ status: 'succeeded', message: `User ${email} removed from group.` });
 		} catch (error) {
 			ack({ status: 'failed', message: error.message });

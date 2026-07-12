@@ -1,37 +1,15 @@
 import BaseModule from '../base.js';
-import DataService from '../../database/data_service.js';
 
+/**
+ * The fleet `/user` namespace hosts only self-service actions (update, delete) that operate on the
+ * authenticated socket's own account. There is no fleet-wide admin or super-user, so this module
+ * deliberately does not load, cache, or emit any list of users — a fleet user can neither enumerate
+ * nor read other accounts. The plugins derive identity from the session (socket), never from a
+ * client-supplied user list.
+ */
 class UserModule extends BaseModule {
 	constructor() {
 		super('user');
-
-		(async () => {
-			await this.#loadUsers();
-		})();
-
-		this.eventEmitter.on('users:updated', async () => {
-			await this.#loadUsers();
-			this.nsp.sockets.forEach((socket) => {
-				if (socket.isAuthenticated) {
-					socket.emit('users', this.toArray(this.getState('users')).filter((user) => { return user.email === socket.email; }));
-				}
-			});
-		});
-	}
-
-	onConnection(socket) {
-		if (this.getState('users') && socket.isAuthenticated) {
-			socket.emit('users', this.toArray(this.getState('users')).filter((user) => { return user.email === socket.email; }));
-		}
-	}
-
-	async #loadUsers() {
-		try {
-			const users = await DataService.getUsers();
-			this.setState('users', users);
-		} catch (error) {
-			this.setState('users', false);
-		}
 	}
 }
 
