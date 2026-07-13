@@ -11,6 +11,9 @@ import { emitNodes } from './proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeSocketsByNodeId = new Map();
+// Deleted on disconnect so an offline node shows no badge; refreshed on reconnect. Shape matches
+// host:updates: array | [] | false.
+const updatesByNodeId = new Map();
 const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
 
 class NodeModule {
@@ -86,6 +89,12 @@ class NodeModule {
 			if (socket.data?.role === 'node' && socket.data?.nodeId) {
 				this.setNodeSocket(socket.data.nodeId, socket);
 				this.#handleNodePresence(socket.data.nodeId, true);
+				socket.on('node:updates', ({ updates } = {}) => {
+					updatesByNodeId.set(socket.data.nodeId, updates);
+					DataService.listNodeMemberUserIds(socket.data.nodeId)
+						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
+						.catch((error) => { console.error('Error broadcasting node updates:', error); });
+				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
 				emitNodes(socket, this).catch((error) => {
@@ -101,6 +110,7 @@ class NodeModule {
 				const nodeId = socket.data?.nodeId;
 				if (nodeId && nodeSocketsByNodeId.get(nodeId) === socket) {
 					nodeSocketsByNodeId.delete(nodeId);
+					updatesByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.
@@ -171,6 +181,11 @@ class NodeModule {
 
 	isNodeOnline(nodeId) {
 		return nodeSocketsByNodeId.has(nodeId);
+	}
+
+	/** Host updates the node last reported (array | [] | false), or null when offline/unknown. */
+	getNodeUpdates(nodeId) {
+		return updatesByNodeId.get(nodeId) ?? null;
 	}
 
 	/** Best-effort request to an online node to wipe its own fleet config. */

@@ -11,7 +11,8 @@ const emitNodes = async (socket, module) => {
 		const inventory = await Promise.all(nodes.map(async (node) => {
 			const entry = {
 				...node,
-				online: module.isNodeOnline(node.nodeId)
+				online: module.isNodeOnline(node.nodeId),
+				updates: module.getNodeUpdates(node.nodeId)
 			};
 			if (node.isOwner) {
 				const members = await DataService.listNodeMembers(node.nodeId);
