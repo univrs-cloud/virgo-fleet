@@ -27,16 +27,16 @@ async function signup(req, res) {
 	}
 }
 
-// Landing point for the link in the verification email. On success the account is promoted
-// and logged in via cookies, then redirected into the app; on failure it redirects back to
-// the login screen with a flag the UI can surface.
+// Called by the /signup/confirm screen with the token from the email link. On success the account
+// is promoted and the (MFA-gated, setup_required) session cookies are set; the screen then navigates
+// on and the app forces enrollment. Returns JSON — it's a fetch, not a browser navigation.
 async function verify(req, res) {
 	try {
-		const result = await DataService.verifyPendingUser(req.query?.token);
-		setAuthCookies(res, req, { token: result.token, user: result.user });
-		res.redirect('/');
+		const result = await DataService.verifyPendingUser(req.body?.token);
+		setAuthCookies(res, req, { token: result.token, user: result.user, mfaState: result.mfaState });
+		res.json({ status: 'succeeded', mfa: result.mfaState === 'satisfied' ? null : result.mfaState });
 	} catch (error) {
-		res.redirect(`/?verify=failed&reason=${encodeURIComponent(error.message)}`);
+		res.status(400).json({ status: 'failed', message: error.message });
 	}
 }
 
@@ -46,10 +46,78 @@ async function login(req, res) {
 			email: req.body?.email,
 			password: req.body?.password
 		});
-		setAuthCookies(res, req, { token: result.token, user: result.user });
-		res.json({ status: 'succeeded' });
+		// The session is gated (setup_required / challenge_required) until MFA is satisfied; the UI
+		// reloads and the account cookie's mfa flag routes it to the setup or challenge screen.
+		setAuthCookies(res, req, { token: result.token, user: result.user, mfaState: result.mfaState });
+		res.json({ status: 'succeeded', mfa: result.mfaState === 'satisfied' ? null : result.mfaState });
 	} catch (error) {
 		res.status(401).json({ status: 'failed', message: error.message });
+	}
+}
+
+// Loads the session behind the request's cookie. Returns nulls when absent/expired.
+async function sessionFromRequest(req) {
+	const token = getSessionTokenFromCookieHeader(req.headers.cookie);
+	const session = token ? await DataService.getSessionByToken(token) : null;
+	return { token, session, user: session?.FleetUser || null };
+}
+
+// Begin TOTP enrollment — only reachable by a session that's actually in setup_required. Returns
+// the secret + otpauth URI for the client to render as a QR.
+async function mfaSetup(req, res) {
+	try {
+		const { session, user } = await sessionFromRequest(req);
+		if (!user || session.mfaState !== 'setup_required') {
+			res.status(403).json({ status: 'failed', message: 'Not allowed.' });
+			return;
+		}
+		const { secret, otpauthUrl } = await DataService.beginTotpSetup(user.id);
+		res.json({ status: 'succeeded', secret, otpauthUrl });
+	} catch (error) {
+		res.status(400).json({ status: 'failed', message: error.message });
+	}
+}
+
+// Confirm enrollment with the first code; on success the session becomes satisfied and the
+// one-time recovery codes are returned to show once.
+async function mfaSetupVerify(req, res) {
+	try {
+		const { token, session, user } = await sessionFromRequest(req);
+		if (!user || session.mfaState !== 'setup_required') {
+			res.status(403).json({ status: 'failed', message: 'Not allowed.' });
+			return;
+		}
+		const { recoveryCodes } = await DataService.confirmTotpSetup(user.id, req.body?.code);
+		await DataService.setSessionMfaState(token, 'satisfied');
+		setAuthCookies(res, req, { token, user, mfaState: 'satisfied' });
+		res.json({ status: 'succeeded', recoveryCodes });
+	} catch (error) {
+		res.status(400).json({ status: 'failed', message: error.message });
+	}
+}
+
+// Clear the login TOTP challenge with a code or a recovery code; on success the session is lifted
+// to satisfied.
+async function mfaVerify(req, res) {
+	try {
+		const { token, session, user } = await sessionFromRequest(req);
+		if (!user || session.mfaState !== 'challenge_required') {
+			res.status(403).json({ status: 'failed', message: 'Not allowed.' });
+			return;
+		}
+		const recoveryCode = req.body?.recoveryCode;
+		const passed = recoveryCode
+			? await DataService.consumeRecoveryCode(user.id, recoveryCode)
+			: await DataService.verifyTotpChallenge(user.id, req.body?.code);
+		if (!passed) {
+			res.status(401).json({ status: 'failed', message: 'That code is not valid.' });
+			return;
+		}
+		await DataService.setSessionMfaState(token, 'satisfied');
+		setAuthCookies(res, req, { token, user, mfaState: 'satisfied' });
+		res.json({ status: 'succeeded' });
+	} catch (error) {
+		res.status(400).json({ status: 'failed', message: error.message });
 	}
 }
 
@@ -63,7 +131,7 @@ async function changePassword(req, res) {
 		const token = getSessionTokenFromCookieHeader(req.headers.cookie);
 		const session = token ? await DataService.getSessionByToken(token) : null;
 		const user = session?.FleetUser || null;
-		if (!user) {
+		if (!user || session.mfaState !== 'satisfied') {
 			res.status(401).json({ status: 'failed', message: 'Not authenticated.' });
 			return;
 		}
@@ -107,5 +175,8 @@ export {
 	verify,
 	login,
 	logout,
-	changePassword
+	changePassword,
+	mfaSetup,
+	mfaSetupVerify,
+	mfaVerify
 };

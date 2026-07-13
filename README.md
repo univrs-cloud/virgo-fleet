@@ -5,6 +5,7 @@
 CERTRESOLVER='le'
 DOMAIN='your.domain'
 DB_PASSWORD='your-db-password'
+MFA_SECRET_KEY='a-long-random-string'
 SMTP_HOST='smtp.your.provider'
 SMTP_PORT='587'
 SMTP_SECURE='false'
@@ -24,6 +25,7 @@ services:
       - DB_NAME=${DB_NAME:-fleet}
       - DB_USER=${DB_USER:-fleet}
       - DB_PASSWORD=${DB_PASSWORD}
+      - MFA_SECRET_KEY=${MFA_SECRET_KEY}
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_SECURE=${SMTP_SECURE:-false}

@@ -8,7 +8,11 @@ const resolveFleetUser = async (req) => {
 		return null;
 	}
 	const session = await DataService.getSessionByToken(sessionToken);
-	return session?.FleetUser || null;
+	// Gated (MFA-pending) sessions can't reach proxied node content.
+	if (!session || session.mfaState !== 'satisfied') {
+		return null;
+	}
+	return session.FleetUser || null;
 };
 
 const injectNodeContext = (html, nodeId) => {

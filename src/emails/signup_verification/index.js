@@ -2,7 +2,8 @@ import { sendEmail } from '../../utils/mailer.js';
 import { loadTemplate, renderTemplate, escapeHtml, getAppUrl } from '../helpers.js';
 
 function buildVerificationUrl(token) {
-	return `${getAppUrl()}/auth/verify?token=${encodeURIComponent(token)}`;
+	// Points at the SPA confirmation route (which calls the verify API), not the API directly.
+	return `${getAppUrl()}/signup/confirm?token=${encodeURIComponent(token)}`;
 }
 
 // Builds and sends the signup email-verification message. This folder owns the "what to send" —

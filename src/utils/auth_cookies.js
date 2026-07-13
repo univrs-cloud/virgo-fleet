@@ -31,21 +31,38 @@ function getCookieOptions(req, { httpOnly = false } = {}) {
  * Access to a node's own system pages (in fleet mode) is instead granted per-node
  * based on node access, not on this cookie.
  */
-function buildAccountFromUser(user) {
-	return {
+function mfaFlag(mfaState) {
+	if (mfaState === 'setup_required') {
+		return 'setup';
+	}
+	if (mfaState === 'challenge_required') {
+		return 'challenge';
+	}
+	return null;
+}
+
+function buildAccountFromUser(user, mfaState = 'satisfied') {
+	const account = {
 		name: user.displayName || user.email,
 		user: user.email,
 		email: user.email,
 		groups: ['users']
 	};
+	// Readable by the UI so the bootstrap can route a gated session to the forced setup/challenge
+	// screen instead of the dashboard. Absent once the session is satisfied.
+	const mfa = mfaFlag(mfaState);
+	if (mfa) {
+		account.mfa = mfa;
+	}
+	return account;
 }
 
 function serializeAccount(account) {
 	return Buffer.from(JSON.stringify(account)).toString('base64');
 }
 
-function setAuthCookies(res, req, { token, user }) {
-	const account = buildAccountFromUser(user);
+function setAuthCookies(res, req, { token, user, mfaState = 'satisfied' }) {
+	const account = buildAccountFromUser(user, mfaState);
 	// The session token is the credential — keep it httpOnly so page scripts (and any XSS) can't
 	// read it. The account cookie is display-only and must stay readable by the UI.
 	res.cookie('virgo.session', token, getCookieOptions(req, { httpOnly: true }));

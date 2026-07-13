@@ -56,4 +56,9 @@ ENV DOMAIN="" \
     SMTP_USER="" \
     SMTP_FROM=""
 
+# Two-factor (TOTP). MFA_SECRET_KEY encrypts TOTP secrets at rest (AES-256-GCM); any string works
+# (it's hashed to a 32-byte key). Strongly recommended — without it, TOTP secrets are stored
+# unencrypted and a DB dump would expose them. Runtime only, never baked into the image.
+#   MFA_SECRET_KEY   at-rest encryption key for TOTP secrets
+
 CMD ["node", "index.js"]

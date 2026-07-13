@@ -9,10 +9,21 @@ import {
 	FleetPendingUser,
 	FleetUser,
 	FleetGroup,
+	FleetRecoveryCode,
 	FleetUserGroup,
 	GroupNodeAccess
 } from './models/associations.js';
 import { normalizeEmail } from '../utils/email.js';
+import {
+	encryptSecret,
+	decryptSecret,
+	generateSecret,
+	buildOtpauthUrl,
+	verifyToken,
+	generateRecoveryCodes,
+	hashRecoveryCode,
+	verifyRecoveryCode
+} from '../utils/totp.js';
 
 const PASSWORD_COST = 12;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
@@ -43,7 +54,18 @@ function toPublicUser(user) {
 class DataService {
 	static async initialize() {
 		await sequelize.sync();
+		await this.applyMfaSchema();
 		return true;
+	}
+
+	// Plain sync() creates missing tables (fleet_recovery_codes) but never alters existing ones, so
+	// add the MFA columns to pre-existing fleet_users/fleet_sessions idempotently. On a fresh DB sync
+	// already made them and these are no-ops. Postgres-only (ADD COLUMN IF NOT EXISTS).
+	static async applyMfaSchema() {
+		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "totpSecret" VARCHAR(255)');
+		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "totpPendingSecret" VARCHAR(255)');
+		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "totpEnabledAt" TIMESTAMP WITH TIME ZONE');
+		await sequelize.query('ALTER TABLE "fleet_sessions" ADD COLUMN IF NOT EXISTS "mfaState" VARCHAR(32) NOT NULL DEFAULT \'satisfied\'');
 	}
 
 	static async getUsers() {
@@ -142,7 +164,7 @@ class DataService {
 		return true;
 	}
 
-	static async createSession(userId) {
+	static async createSession(userId, mfaState = 'satisfied') {
 		const token = randomBytes(48).toString('hex');
 		const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 		// Opportunistically clear this user's expired sessions whenever they log in.
@@ -150,9 +172,14 @@ class DataService {
 		await FleetSession.create({
 			token,
 			expiresAt,
-			fleetUserId: userId
+			fleetUserId: userId,
+			mfaState
 		});
 		return { token, expiresAt };
+	}
+
+	static async setSessionMfaState(token, mfaState) {
+		await FleetSession.update({ mfaState }, { where: { token } });
 	}
 
 	static async getSessionByToken(token) {
@@ -180,11 +207,80 @@ class DataService {
 		if (!bcrypt.compareSync(password, user.passwordHash)) {
 			throw new Error('Invalid credentials.');
 		}
-		const session = await this.createSession(user.id);
+		// Mandatory TOTP: an enrolled user must clear a code this login; an unenrolled user is forced
+		// into setup. Either way the session starts gated — only the MFA endpoints can lift it.
+		const mfaState = user.totpEnabledAt ? 'challenge_required' : 'setup_required';
+		const session = await this.createSession(user.id, mfaState);
 		return {
 			...session,
+			mfaState,
 			user: toPublicUser(user)
 		};
+	}
+
+	/** Begin (or restart) TOTP enrollment: generate a fresh secret, stash it as the pending secret,
+	 * and return the plaintext secret + otpauth URI (for the QR). Not active until confirmed. */
+	static async beginTotpSetup(userId) {
+		const user = await FleetUser.findByPk(userId);
+		if (!user) {
+			throw new Error('User not found.');
+		}
+		const secret = generateSecret();
+		user.totpPendingSecret = encryptSecret(secret);
+		await user.save();
+		return { secret, otpauthUrl: buildOtpauthUrl(user.email, secret) };
+	}
+
+	/** Confirm enrollment: the code must match the pending secret. On success the pending secret
+	 * becomes the active one, TOTP is marked enabled, and a fresh set of recovery codes is issued
+	 * (returned in plaintext once). Atomic, so TOTP is never enabled without recovery codes. */
+	static async confirmTotpSetup(userId, code) {
+		const user = await FleetUser.findByPk(userId);
+		if (!user || !user.totpPendingSecret) {
+			throw new Error('No TOTP setup in progress.');
+		}
+		if (!verifyToken(code, decryptSecret(user.totpPendingSecret))) {
+			throw new Error('That code is not valid. Try again with a fresh code from your app.');
+		}
+		const recoveryCodes = generateRecoveryCodes();
+		await sequelize.transaction(async (transaction) => {
+			user.totpSecret = user.totpPendingSecret;
+			user.totpPendingSecret = null;
+			user.totpEnabledAt = new Date();
+			await user.save({ transaction });
+			await FleetRecoveryCode.destroy({ where: { fleetUserId: userId }, transaction });
+			await FleetRecoveryCode.bulkCreate(
+				recoveryCodes.map((plain) => { return { fleetUserId: userId, codeHash: hashRecoveryCode(plain) }; }),
+				{ transaction }
+			);
+		});
+		return { recoveryCodes };
+	}
+
+	/** Verify a TOTP code for the login challenge (against the active secret). */
+	static async verifyTotpChallenge(userId, code) {
+		const user = await FleetUser.findByPk(userId);
+		if (!user || !user.totpSecret) {
+			return false;
+		}
+		return verifyToken(code, decryptSecret(user.totpSecret));
+	}
+
+	/** Verify and consume a one-time recovery code (bcrypt-compared, then stamped used). */
+	static async consumeRecoveryCode(userId, code) {
+		const rows = await FleetRecoveryCode.findAll({ where: { fleetUserId: userId, usedAt: null } });
+		for (const row of rows) {
+			if (verifyRecoveryCode(code, row.codeHash)) {
+				row.usedAt = new Date();
+				await row.save();
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static async countRemainingRecoveryCodes(userId) {
+		return FleetRecoveryCode.count({ where: { fleetUserId: userId, usedAt: null } });
 	}
 
 	// Registers an account into the pending table and returns the verification token so the
@@ -258,9 +354,12 @@ class DataService {
 			await pending.destroy({ transaction });
 			return created;
 		});
-		const session = await this.createSession(user.id);
+		// A newly activated account has no TOTP yet — start the session gated so the app forces
+		// mandatory enrollment before anything else is reachable.
+		const session = await this.createSession(user.id, 'setup_required');
 		return {
 			...session,
+			mfaState: 'setup_required',
 			user: toPublicUser(user)
 		};
 	}

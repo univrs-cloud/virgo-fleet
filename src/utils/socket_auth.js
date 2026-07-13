@@ -7,7 +7,9 @@ async function applyFleetUserSession(socket, sessionToken) {
 		return false;
 	}
 	const session = await DataService.getSessionByToken(sessionToken);
-	if (!session?.FleetUser) {
+	// A session that hasn't cleared MFA (setup_required / challenge_required) is not authenticated
+	// for anything on the socket — only the HTTP MFA endpoints can act on it.
+	if (!session?.FleetUser || session.mfaState !== 'satisfied') {
 		return false;
 	}
 	socket.isAuthenticated = true;
