@@ -11,8 +11,8 @@ import { emitNodes } from './proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nodeSocketsByNodeId = new Map();
-// Deleted on disconnect so an offline node shows no badge; refreshed on reconnect. Shape matches
-// host:updates: array | [] | false.
+// Deleted on disconnect so an offline node shows no badge; refreshed on reconnect. Value is
+// { system, apps }, each an updates array | [] | false.
 const updatesByNodeId = new Map();
 const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
 
@@ -89,8 +89,8 @@ class NodeModule {
 			if (socket.data?.role === 'node' && socket.data?.nodeId) {
 				this.setNodeSocket(socket.data.nodeId, socket);
 				this.#handleNodePresence(socket.data.nodeId, true);
-				socket.on('node:updates', ({ updates } = {}) => {
-					updatesByNodeId.set(socket.data.nodeId, updates);
+				socket.on('node:updates', ({ system, apps } = {}) => {
+					updatesByNodeId.set(socket.data.nodeId, { system, apps });
 					DataService.listNodeMemberUserIds(socket.data.nodeId)
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node updates:', error); });
@@ -183,7 +183,7 @@ class NodeModule {
 		return nodeSocketsByNodeId.has(nodeId);
 	}
 
-	/** Host updates the node last reported (array | [] | false), or null when offline/unknown. */
+	/** { system, apps } the node last reported, or null when offline/unknown. */
 	getNodeUpdates(nodeId) {
 		return updatesByNodeId.get(nodeId) ?? null;
 	}
