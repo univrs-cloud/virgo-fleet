@@ -1,4 +1,5 @@
 import Node from './Node.js';
+import NodeConnectivityEvent from './NodeConnectivityEvent.js';
 import FleetSession from './FleetSession.js';
 import FleetPendingUser from './FleetPendingUser.js';
 import FleetUser from './FleetUser.js';
@@ -55,10 +56,16 @@ FleetUser.hasMany(Node, { as: 'ownedNodes', foreignKey: 'ownerUserId', onDelete:
 FleetGroup.belongsTo(FleetUser, { as: 'creator', foreignKey: 'createdByUserId', onDelete: 'CASCADE' });
 FleetUser.hasMany(FleetGroup, { as: 'createdGroups', foreignKey: 'createdByUserId', onDelete: 'CASCADE' });
 
+// Connectivity events are keyed by the node's public nodeId (not its PK) so they can be recorded
+// from the socket layer, and cascade away when the node is deleted.
+Node.hasMany(NodeConnectivityEvent, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
+NodeConnectivityEvent.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
+
 export {
 	FleetUser,
 	FleetGroup,
 	Node,
+	NodeConnectivityEvent,
 	FleetSession,
 	FleetPendingUser,
 	FleetRecoveryCode,

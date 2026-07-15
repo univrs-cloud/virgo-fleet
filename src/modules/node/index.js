@@ -15,6 +15,8 @@ const nodeSocketsByNodeId = new Map();
 // { system, apps }, each an updates array | [] | false.
 const updatesByNodeId = new Map();
 const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
+// How often stale connectivity events (beyond the retention window) are swept.
+const CONNECTIVITY_PRUNE_INTERVAL_MS = 1000 * 60 * 60;
 
 class NodeModule {
 	#nsp;
@@ -40,6 +42,16 @@ class NodeModule {
 		setImmediate(() => {
 			this.#loadPlugins();
 		});
+		// Sweep connectivity history down to the retention window on a slow cadence; unref so it never
+		// keeps the process alive. Run once up front to clear anything stale from a previous run.
+		DataService.pruneConnectivityEvents().catch((error) => {
+			console.error('Error pruning connectivity events:', error);
+		});
+		setInterval(() => {
+			DataService.pruneConnectivityEvents().catch((error) => {
+				console.error('Error pruning connectivity events:', error);
+			});
+		}, CONNECTIVITY_PRUNE_INTERVAL_MS).unref();
 	}
 
 	get nsp() {
@@ -150,6 +162,11 @@ class NodeModule {
 	async #handleNodePresence(nodeId, online) {
 		DataService.touchNodeLastSeen(nodeId).catch((error) => {
 			console.error('Error updating node last seen:', error);
+		});
+		// Record the transition so the fleet grid can draw the node's 24h connectivity bar. Independent
+		// of the lastSeen write and the fan-out below, so a failure here doesn't gate presence updates.
+		DataService.recordConnectivityEvent(nodeId, online).catch((error) => {
+			console.error('Error recording connectivity event:', error);
 		});
 		try {
 			const userIds = await DataService.listNodeMemberUserIds(nodeId);

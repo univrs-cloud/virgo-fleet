@@ -1,6 +1,9 @@
 import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
+import { buildConnectivitySegments } from '../../utils/connectivity.js';
 import { disconnectNodeUser, revokeStaleNodeAccess } from '../../utils/node_proxy.js';
+
+const CONNECTIVITY_WINDOW_MS = 1000 * 60 * 60 * 24;
 
 const emitNodes = async (socket, module) => {
 	try {
@@ -8,11 +11,29 @@ const emitNodes = async (socket, module) => {
 			return;
 		}
 		const nodes = await DataService.listAccessibleNodes(socket.userId);
+		// One query for every accessible node's events, grouped in memory, so each node's 24h bar is
+		// built without a per-node round-trip.
+		const nowMs = Date.now();
+		const windowStartMs = nowMs - CONNECTIVITY_WINDOW_MS;
+		const eventsByNodeId = new Map();
+		for (const event of await DataService.getConnectivityEvents(nodes.map((node) => { return node.nodeId; }))) {
+			if (!eventsByNodeId.has(event.nodeId)) {
+				eventsByNodeId.set(event.nodeId, []);
+			}
+			eventsByNodeId.get(event.nodeId).push(event);
+		}
 		const inventory = await Promise.all(nodes.map(async (node) => {
+			const online = module.isNodeOnline(node.nodeId);
 			const entry = {
 				...node,
-				online: module.isNodeOnline(node.nodeId),
-				updates: module.getNodeUpdates(node.nodeId)
+				online,
+				updates: module.getNodeUpdates(node.nodeId),
+				connectivity: buildConnectivitySegments({
+					events: eventsByNodeId.get(node.nodeId) || [],
+					windowStartMs,
+					nowMs,
+					liveOnline: online
+				})
 			};
 			if (node.isOwner) {
 				const members = await DataService.listNodeMembers(node.nodeId);

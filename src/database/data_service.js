@@ -4,6 +4,7 @@ import { Op } from 'sequelize';
 import { sequelize } from './index.js';
 import {
 	Node,
+	NodeConnectivityEvent,
 	NodeAccess,
 	FleetSession,
 	FleetPendingUser,
@@ -30,6 +31,10 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 // A verification link is only good for 30 minutes; after that the pending row is dead weight
 // and re-registering the same email issues a fresh one.
 const PENDING_TTL_MS = 1000 * 60 * 30;
+// The connectivity bar covers 24h; keep an hour of slack so the "state at the window start" seed
+// is always available. The single most-recent event per node is retained beyond this regardless
+// (see pruneConnectivityEvents), so a long-online node still has a seed.
+const CONNECTIVITY_RETENTION_MS = 1000 * 60 * 60 * 25;
 
 function toPublicUser(user) {
 	if (!user) {
@@ -578,6 +583,62 @@ class DataService {
 		} catch (error) {
 			console.error(`Error updating lastSeenAt for node '${normalizedNodeId}':`, error);
 		}
+	}
+
+	/** Record a connectivity transition for a node, but only when it differs from the node's most
+	 * recent recorded state — redundant same-state events (e.g. a reconnect that never registered a
+	 * disconnect) would just bloat the table without adding information to the bar. */
+	static async recordConnectivityEvent(nodeId, online) {
+		const normalizedNodeId = String(nodeId || '').trim();
+		if (!normalizedNodeId) {
+			return;
+		}
+		const last = await NodeConnectivityEvent.findOne({
+			where: { nodeId: normalizedNodeId },
+			order: [['createdAt', 'DESC']]
+		});
+		if (last && last.online === Boolean(online)) {
+			return;
+		}
+		await NodeConnectivityEvent.create({ nodeId: normalizedNodeId, online: Boolean(online) });
+	}
+
+	/** All retained connectivity events for the given nodes, oldest first. Volume stays small
+	 * because pruneConnectivityEvents caps history at the retention window (plus one seed per node),
+	 * so the caller can group in memory and hand each node's events to buildConnectivitySegments. */
+	static async getConnectivityEvents(nodeIds) {
+		const ids = (nodeIds || []).map((id) => { return String(id || '').trim(); }).filter(Boolean);
+		if (ids.length === 0) {
+			return [];
+		}
+		const events = await NodeConnectivityEvent.findAll({
+			where: { nodeId: { [Op.in]: ids } },
+			attributes: ['nodeId', 'online', 'createdAt'],
+			order: [['createdAt', 'ASC']]
+		});
+		return events.map((event) => {
+			const plain = event.get({ plain: true });
+			return { nodeId: plain.nodeId, online: plain.online, createdAt: plain.createdAt };
+		});
+	}
+
+	/** Delete events older than the retention window, but always keep each node's single most-recent
+	 * event so the "state at the start of the 24h window" seed survives even for a node that has been
+	 * continuously online (its last transition may be days old). */
+	static async pruneConnectivityEvents() {
+		const cutoff = new Date(Date.now() - CONNECTIVITY_RETENTION_MS);
+		const latestPerNode = await NodeConnectivityEvent.findAll({
+			attributes: [[sequelize.fn('MAX', sequelize.col('id')), 'id']],
+			group: ['nodeId'],
+			raw: true
+		});
+		const keepIds = latestPerNode.map((row) => { return row.id; });
+		await NodeConnectivityEvent.destroy({
+			where: {
+				createdAt: { [Op.lt]: cutoff },
+				...(keepIds.length ? { id: { [Op.notIn]: keepIds } } : {})
+			}
+		});
 	}
 
 	static async grantNodeAccess({ email, nodeId, role = 'admin' }) {
