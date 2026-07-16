@@ -28,6 +28,7 @@ const emitNodes = async (socket, module) => {
 				...node,
 				online,
 				updates: module.getNodeUpdates(node.nodeId),
+				update: module.getNodeUpdate(node.nodeId),
 				connectivity: buildConnectivitySegments({
 					events: eventsByNodeId.get(node.nodeId) || [],
 					windowStartMs,

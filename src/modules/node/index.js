@@ -14,9 +14,28 @@ const nodeSocketsByNodeId = new Map();
 // Deleted on disconnect so an offline node shows no badge; refreshed on reconnect. Value is
 // { system, apps }, each an updates array | [] | false.
 const updatesByNodeId = new Map();
+const updateByNodeId = new Map();
 const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
 // How often stale connectivity events (beyond the retention window) are swept.
 const CONNECTIVITY_PRUNE_INTERVAL_MS = 1000 * 60 * 60;
+const UPDATE_STAGES = new Set(['download', 'install']);
+
+const sanitizeUpdate = (update) => {
+	const state = update?.state;
+	if (state === 'succeeded' || state === 'failed') {
+		return { state };
+	}
+	if (state !== 'running') {
+		return null;
+	}
+
+	const progress = update.progress;
+	const percent = Number(progress?.percent);
+	if (!progress || !UPDATE_STAGES.has(progress.stage) || !Number.isFinite(percent)) {
+		return { state };
+	}
+	return { state, stage: progress.stage, percent: Math.min(100, Math.max(0, Math.round(percent))) };
+};
 
 class NodeModule {
 	#nsp;
@@ -107,6 +126,17 @@ class NodeModule {
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node updates:', error); });
 				});
+				socket.on('node:update', (update) => {
+					const sanitized = sanitizeUpdate(update);
+					if (sanitized) {
+						updateByNodeId.set(socket.data.nodeId, sanitized);
+					} else {
+						updateByNodeId.delete(socket.data.nodeId);
+					}
+					DataService.listNodeMemberUserIds(socket.data.nodeId)
+						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
+						.catch((error) => { console.error('Error broadcasting node update progress:', error); });
+				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
 				emitNodes(socket, this).catch((error) => {
@@ -123,6 +153,7 @@ class NodeModule {
 				if (nodeId && nodeSocketsByNodeId.get(nodeId) === socket) {
 					nodeSocketsByNodeId.delete(nodeId);
 					updatesByNodeId.delete(nodeId);
+					updateByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.
@@ -203,6 +234,10 @@ class NodeModule {
 	/** { system, apps } the node last reported, or null when offline/unknown. */
 	getNodeUpdates(nodeId) {
 		return updatesByNodeId.get(nodeId) ?? null;
+	}
+
+	getNodeUpdate(nodeId) {
+		return updateByNodeId.get(nodeId) ?? null;
 	}
 
 	/** Best-effort request to an online node to wipe its own fleet config. */
