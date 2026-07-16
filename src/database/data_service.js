@@ -32,8 +32,9 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 // and re-registering the same email issues a fresh one.
 const PENDING_TTL_MS = 1000 * 60 * 30;
 // The connectivity bar covers 24h; keep an hour of slack so the "state at the window start" seed
-// is always available. The single most-recent event per node is retained beyond this regardless
-// (see pruneConnectivityEvents), so a long-online node still has a seed.
+// is always available. Each node's most-recent event at-or-before this cutoff is retained beyond
+// it regardless (see pruneConnectivityEvents), so a node stable for days still keeps the one
+// transition that tells us its current state and since when.
 const CONNECTIVITY_RETENTION_MS = 1000 * 60 * 60 * 25;
 
 function toPublicUser(user) {
@@ -622,21 +623,25 @@ class DataService {
 		});
 	}
 
-	/** Delete events older than the retention window, but always keep each node's single most-recent
-	 * event so the "state at the start of the 24h window" seed survives even for a node that has been
-	 * continuously online (its last transition may be days old). */
+	/** Trim connectivity history to the retained window, keeping per node the single most recent
+	 * event at-or-before the cutoff (the "seed" for the current standing state) plus everything
+	 * newer, and deleting only the pre-cutoff events that seed supersedes. A node whose state has
+	 * not changed in a long time keeps that last transition even if it is far older than the cutoff,
+	 * so we can always tell what state it is in and since when. (id is autoincrement, hence monotonic
+	 * with insertion time, so MAX(id) per node picks that most-recent pre-cutoff event.) */
 	static async pruneConnectivityEvents() {
 		const cutoff = new Date(Date.now() - CONNECTIVITY_RETENTION_MS);
-		const latestPerNode = await NodeConnectivityEvent.findAll({
+		const seeds = await NodeConnectivityEvent.findAll({
 			attributes: [[sequelize.fn('MAX', sequelize.col('id')), 'id']],
+			where: { createdAt: { [Op.lte]: cutoff } },
 			group: ['nodeId'],
 			raw: true
 		});
-		const keepIds = latestPerNode.map((row) => { return row.id; });
+		const seedIds = seeds.map((row) => { return row.id; });
 		await NodeConnectivityEvent.destroy({
 			where: {
-				createdAt: { [Op.lt]: cutoff },
-				...(keepIds.length ? { id: { [Op.notIn]: keepIds } } : {})
+				createdAt: { [Op.lte]: cutoff },
+				...(seedIds.length ? { id: { [Op.notIn]: seedIds } } : {})
 			}
 		});
 	}
