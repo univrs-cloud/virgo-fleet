@@ -50,7 +50,7 @@ const relayEventToNode = (nodeSocket, { namespace, event, config }) => {
 			settled = true;
 			cleanup();
 			nodeSocket.emit('proxy:close', { sessionId });
-			reject(new Error('Timed out reaching node.'));
+			reject(new Error('The node did not respond. Please try again.'));
 		}, NODE_RELAY_TIMEOUT_MS);
 		nodeSocket.on('proxy:event', onEvent);
 		nodeSocket.on('proxy:close', onClose);
