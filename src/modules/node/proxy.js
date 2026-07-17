@@ -1,9 +1,62 @@
+import { randomUUID } from 'crypto';
 import DataService from '../../database/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
 import { buildConnectivitySegments } from '../../utils/connectivity.js';
 import { disconnectNodeUser, revokeStaleNodeAccess } from '../../utils/node_proxy.js';
 
 const CONNECTIVITY_WINDOW_MS = 1000 * 60 * 60 * 24;
+// How long to wait for a node to bring the proxied namespace online before giving up.
+const NODE_RELAY_TIMEOUT_MS = 8000;
+
+/** Delivers a single event into one of an online node's own namespaces (e.g. host:update on /host) by
+ * driving its existing control-socket proxy — the same path a browser uses to reach a node page, so
+ * no node-side change is needed. Opens a proxy session to `namespace`, waits for the node's first
+ * event back on it (proof its internal socket has connected — the node drops relayed events until
+ * then), delivers `event` (with optional `config`, forwarded as the event's argument), then closes
+ * the session. Generic on purpose: reaching a different subsystem later (e.g. app updates) is a
+ * different namespace/event/config, not another copy of this. */
+const relayEventToNode = (nodeSocket, { namespace, event, config }) => {
+	return new Promise((resolve, reject) => {
+		const sessionId = randomUUID();
+		let settled = false;
+		const cleanup = () => {
+			clearTimeout(timer);
+			nodeSocket.off('proxy:event', onEvent);
+			nodeSocket.off('proxy:close', onClose);
+		};
+		const onEvent = (payload = {}) => {
+			if (payload.sessionId !== sessionId || settled) {
+				return;
+			}
+			settled = true;
+			cleanup();
+			nodeSocket.emit('proxy:event', { sessionId, event, args: config === undefined ? [] : [config] });
+			// Let the event flush before tearing the session down.
+			setTimeout(() => { nodeSocket.emit('proxy:close', { sessionId }); }, 1000);
+			resolve();
+		};
+		const onClose = (payload = {}) => {
+			if (payload.sessionId !== sessionId || settled) {
+				return;
+			}
+			settled = true;
+			cleanup();
+			reject(new Error('Node closed the proxy session.'));
+		};
+		const timer = setTimeout(() => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			cleanup();
+			nodeSocket.emit('proxy:close', { sessionId });
+			reject(new Error('Timed out reaching node.'));
+		}, NODE_RELAY_TIMEOUT_MS);
+		nodeSocket.on('proxy:event', onEvent);
+		nodeSocket.on('proxy:close', onClose);
+		nodeSocket.emit('proxy:open', { sessionId, namespace, user: { groups: ['admins'] } });
+	});
+};
 
 const emitNodes = async (socket, module) => {
 	try {
@@ -207,6 +260,34 @@ const onConnection = (socket, module) => {
 			// The owner tears the node down: unregister an online node (wiping its own fleet
 			// config) then remove the fleet records and refresh the remaining members.
 			await module.teardownNode(nodeId);
+			ack({ status: 'succeeded' });
+		} catch (error) {
+			ack({ status: 'failed', message: error.message });
+		}
+	});
+
+	socket.on('node:update', async (config, ack = () => {}) => {
+		try {
+			if (!socket.isAuthenticated) {
+				ack({ status: 'failed', message: 'Authentication required.' });
+				return;
+			}
+			const nodeId = String(config?.nodeId || '').trim();
+			if (!nodeId) {
+				ack({ status: 'failed', message: 'nodeId is required.' });
+				return;
+			}
+			const allowed = await DataService.canUserAccessNode(socket.userId, nodeId);
+			if (!allowed) {
+				ack({ status: 'failed', message: 'Access denied for node.' });
+				return;
+			}
+			const nodeSocket = module.getNodeSocket(nodeId);
+			if (!nodeSocket?.connected) {
+				ack({ status: 'failed', message: 'Node is offline.' });
+				return;
+			}
+			await relayEventToNode(nodeSocket, { namespace: '/host', event: 'host:update' });
 			ack({ status: 'succeeded' });
 		} catch (error) {
 			ack({ status: 'failed', message: error.message });
