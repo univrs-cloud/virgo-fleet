@@ -58,6 +58,37 @@ const relayEventToNode = (nodeSocket, { namespace, event, config }) => {
 	});
 };
 
+/** Shared driver for the fleet events that relay a /host control event to an online node the
+ * caller can access (system update start / finish). Validates the request, then hands off to
+ * relayEventToNode; the ack mirrors the other node:* handlers. */
+const relayHostEvent = async (socket, module, event, config, ack) => {
+	try {
+		if (!socket.isAuthenticated) {
+			ack({ status: 'failed', message: 'Authentication required.' });
+			return;
+		}
+		const nodeId = String(config?.nodeId || '').trim();
+		if (!nodeId) {
+			ack({ status: 'failed', message: 'nodeId is required.' });
+			return;
+		}
+		const allowed = await DataService.canUserAccessNode(socket.userId, nodeId);
+		if (!allowed) {
+			ack({ status: 'failed', message: 'Access denied for node.' });
+			return;
+		}
+		const nodeSocket = module.getNodeSocket(nodeId);
+		if (!nodeSocket?.connected) {
+			ack({ status: 'failed', message: 'Node is offline.' });
+			return;
+		}
+		await relayEventToNode(nodeSocket, { namespace: '/host', event });
+		ack({ status: 'succeeded' });
+	} catch (error) {
+		ack({ status: 'failed', message: error.message });
+	}
+};
+
 const emitNodes = async (socket, module) => {
 	try {
 		if (!socket.isAuthenticated) {
@@ -266,33 +297,10 @@ const onConnection = (socket, module) => {
 		}
 	});
 
-	socket.on('node:update', async (config, ack = () => {}) => {
-		try {
-			if (!socket.isAuthenticated) {
-				ack({ status: 'failed', message: 'Authentication required.' });
-				return;
-			}
-			const nodeId = String(config?.nodeId || '').trim();
-			if (!nodeId) {
-				ack({ status: 'failed', message: 'nodeId is required.' });
-				return;
-			}
-			const allowed = await DataService.canUserAccessNode(socket.userId, nodeId);
-			if (!allowed) {
-				ack({ status: 'failed', message: 'Access denied for node.' });
-				return;
-			}
-			const nodeSocket = module.getNodeSocket(nodeId);
-			if (!nodeSocket?.connected) {
-				ack({ status: 'failed', message: 'Node is offline.' });
-				return;
-			}
-			await relayEventToNode(nodeSocket, { namespace: '/host', event: 'host:update' });
-			ack({ status: 'succeeded' });
-		} catch (error) {
-			ack({ status: 'failed', message: error.message });
-		}
-	});
+	// Relay the node role's system-update controls to the target node: start (host:update) and
+	// finish/Continue (host:update:complete). Both share the same access-checked relay.
+	socket.on('node:update', (config, ack = () => {}) => relayHostEvent(socket, module, 'host:update', config, ack));
+	socket.on('node:update:complete', (config, ack = () => {}) => relayHostEvent(socket, module, 'host:update:complete', config, ack));
 
 	socket.on('group:node:add', async (config, ack = () => {}) => {
 		try {
