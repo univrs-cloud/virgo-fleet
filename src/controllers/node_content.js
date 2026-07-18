@@ -1,6 +1,7 @@
 import DataService from '../database/data_service.js';
 import { getSessionTokenFromCookieHeader } from '../utils/auth_cookies.js';
 import { fetchNodeAsset, streamNodeAsset } from '../utils/node_assets.js';
+import { applyFleetIdentity } from './static.js';
 
 const resolveFleetUser = async (req) => {
 	const sessionToken = getSessionTokenFromCookieHeader(req.headers.cookie);
@@ -76,7 +77,7 @@ const serveNodeContent = async (req, res, next) => {
 				res.status(status);
 				res.set('Content-Type', 'text/html; charset=utf-8');
 				res.set('Cache-Control', 'no-store');
-				res.send(injectNodeContext(body.toString('utf8'), nodeId));
+				res.send(injectNodeContext(applyFleetIdentity(body.toString('utf8')), nodeId));
 				return;
 			}
 

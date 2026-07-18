@@ -14,18 +14,24 @@ const staticMiddleware = express.static(folderPath, {
 // The build ships one index.html carrying the node identity; the fleet reuses it, swapping the
 // role-specific bits (title, favicon, apple-touch icon, loading logo) to the fleet's. The manifest
 // link is left as the absolute /manifest.json, which each origin serves as its own manifest.
+// Absolute targets so a node view (served under /nodes/:id/) still loads these from the fleet origin
+// rather than proxying them through the node.
 const FLEET_SHELL_SUBSTITUTIONS = [
-	['assets/img/virgo.svg', 'assets/img/fleet.svg'],
-	['assets/icons/icon_192x192.png', 'assets/fleet-icons/icon_192x192.png']
+	['assets/img/virgo.svg', '/assets/img/fleet.svg'],
+	['assets/icons/icon_192x192.png', '/assets/fleet-icons/icon_192x192.png']
 ];
+
+// Rewrites a node-identity shell to the fleet's — used both for the fleet origin's own index.html
+// and for the proxied node shell in node views, so both show the fleet logo and icon.
+const applyFleetIdentity = (html) => FLEET_SHELL_SUBSTITUTIONS.reduce(
+	(out, [from, to]) => out.split(from).join(to),
+	html
+);
 
 let fleetShell = null;
 const renderFleetShell = () => {
 	if (fleetShell === null) {
-		fleetShell = FLEET_SHELL_SUBSTITUTIONS.reduce(
-			(html, [from, to]) => html.split(from).join(to),
-			fs.readFileSync(path.join(folderPath, 'index.html'), 'utf8')
-		);
+		fleetShell = applyFleetIdentity(fs.readFileSync(path.join(folderPath, 'index.html'), 'utf8'));
 	}
 	return fleetShell;
 };
@@ -36,5 +42,6 @@ const renderFleetShell = () => {
 export {
 	folderPath,
 	staticMiddleware,
-	renderFleetShell
+	renderFleetShell,
+	applyFleetIdentity
 };

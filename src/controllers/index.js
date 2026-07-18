@@ -24,7 +24,9 @@ router.post('/auth/mfa/setup/verify', authController.mfaSetupVerify);
 router.post('/auth/mfa/verify', authController.mfaVerify);
 router.get('/nodes/:nodeId', nodeContentController.serveNodeContent);
 router.get('/nodes/:nodeId/*rest', nodeContentController.serveNodeContent);
-router.get(['/', '/index.html'], serveFleetShell);
+// `/` already falls through to the catch-all (static has index:false); this guards a direct
+// /index.html request, which express.static would otherwise serve as the raw node-identity shell.
+router.get('/index.html', serveFleetShell);
 router.use('/', staticController.staticMiddleware);
 router.get(/.*/, (req, res, next) => {
 	// Requests under /api/ are meant for Engine.IO (or a REST route above); if they reach
