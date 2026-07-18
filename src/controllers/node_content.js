@@ -61,10 +61,12 @@ const serveNodeContent = async (req, res, next) => {
 		const restParam = req.params.rest;
 		const rest = Array.isArray(restParam) ? restParam.join('/') : (restParam || '');
 		const rawPath = rest ? `/${rest}` : '/';
-		const targetPath = isDocumentPath(rawPath) ? '/index.html' : rawPath;
 
+		// Documents (SPA routes) are forwarded as-is; the node's own catch-all resolves them to its
+		// index.html shell, which we serve with the base rewritten. That shell's absolute /manifest.json
+		// link resolves to the fleet origin, so the fleet PWA manifest applies without any rewrite here.
 		if (isDocumentPath(rawPath)) {
-			const { status, contentType, body } = await fetchNodeAsset(nodeId, targetPath);
+			const { status, contentType, body } = await fetchNodeAsset(nodeId, rawPath);
 			if (status >= 400) {
 				res.status(status).end();
 				return;
@@ -87,7 +89,7 @@ const serveNodeContent = async (req, res, next) => {
 			return;
 		}
 
-		await streamNodeAsset(nodeId, targetPath, res, {
+		await streamNodeAsset(nodeId, rawPath, res, {
 			cacheControl: 'private, max-age=3600'
 		});
 	} catch (error) {
