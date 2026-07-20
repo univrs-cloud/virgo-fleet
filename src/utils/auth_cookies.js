@@ -43,10 +43,11 @@ function mfaFlag(mfaState) {
 
 function buildAccountFromUser(user, mfaState = 'satisfied') {
 	const account = {
-		name: user.displayName || user.email,
+		name: user.name || user.email,
 		user: user.email,
 		email: user.email,
-		groups: ['users']
+		groups: ['users'],
+		pushEnabled: Boolean(user.pushEnabled)
 	};
 	// Readable by the UI so the bootstrap can route a gated session to the forced setup/challenge
 	// screen instead of the dashboard. Absent once the session is satisfied.

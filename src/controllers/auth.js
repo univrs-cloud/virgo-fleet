@@ -7,12 +7,12 @@ async function signup(req, res) {
 	try {
 		pending = await DataService.createPendingUser({
 			email: req.body?.email,
-			displayName: req.body?.displayName,
+			name: req.body?.name,
 			password: req.body?.password
 		});
 		await sendSignupVerificationEmail({
 			to: pending.email,
-			displayName: pending.displayName,
+			name: pending.name,
 			token: pending.token
 		});
 		// No auth cookies here: the account is not usable until the emailed link is clicked.

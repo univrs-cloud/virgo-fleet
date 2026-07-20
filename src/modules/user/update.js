@@ -6,9 +6,9 @@ const updateUser = async (config, socket, module) => {
 	const email = socket.email;
 	await DataService.updateUser({
 		email,
-		displayName: config.fullname || config.displayName
+		name: config.name
 	});
-	// The new displayName is embedded in other users' views too: a node owner's admins list and a
+	// The new name is embedded in other users' views too: a node owner's admins list and a
 	// group manager's member roster both show it. Refresh the affected node owners and group rosters
 	// (groups:updated is untargeted) — otherwise they keep showing the old name until a reload.
 	const affectedOwnerIds = await DataService.listNodeOwnersForMember(socket.userId);

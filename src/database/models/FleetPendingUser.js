@@ -16,7 +16,7 @@ const FleetPendingUser = sequelize.define('FleetPendingUser', {
 		allowNull: false,
 		unique: true
 	},
-	displayName: {
+	name: {
 		type: DataTypes.STRING,
 		allowNull: true
 	},

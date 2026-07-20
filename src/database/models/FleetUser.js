@@ -12,7 +12,7 @@ const FleetUser = sequelize.define('FleetUser', {
 		allowNull: false,
 		unique: true
 	},
-	displayName: {
+	name: {
 		type: DataTypes.STRING,
 		allowNull: true
 	},
@@ -39,6 +39,14 @@ const FleetUser = sequelize.define('FleetUser', {
 	totpEnabledAt: {
 		type: DataTypes.DATE,
 		allowNull: true
+	},
+	// Account-level intent to receive Web Push update notifications. Set true when any device
+	// subscribes, false when the user turns notifications off (which also drops every device's
+	// subscription). Lets a new device know to obtain its own permission without a manual opt-in.
+	pushEnabled: {
+		type: DataTypes.BOOLEAN,
+		allowNull: false,
+		defaultValue: false
 	}
 }, {
 	tableName: 'fleet_users'

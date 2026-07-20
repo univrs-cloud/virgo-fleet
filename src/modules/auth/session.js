@@ -8,12 +8,12 @@ const onConnection = (socket, module) => {
 		try {
 			pending = await DataService.createPendingUser({
 				email: config.email,
-				displayName: config.fullname || config.displayName,
+				name: config.name,
 				password: config.password
 			});
 			await sendSignupVerificationEmail({
 				to: pending.email,
-				displayName: pending.displayName,
+				name: pending.name,
 				token: pending.token
 			});
 			// No session is returned: the account only becomes real once the emailed link is clicked.

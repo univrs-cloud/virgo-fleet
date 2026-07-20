@@ -9,10 +9,10 @@ function buildVerificationUrl(token) {
 // Builds and sends the signup email-verification message. This folder owns the "what to send" —
 // its co-located template.html, the subject and the link shape — while the generic mailer
 // handles delivery.
-export async function sendSignupVerificationEmail({ to, displayName, token }) {
+export async function sendSignupVerificationEmail({ to, name, token }) {
 	const url = buildVerificationUrl(token);
 	const html = renderTemplate(loadTemplate(import.meta.url), {
-		name: escapeHtml(displayName || to),
+		name: escapeHtml(name || to),
 		url: escapeHtml(url)
 	});
 	await MailService.sendEmail({ to, subject: 'Confirm your Univrs fleet account', html });

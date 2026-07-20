@@ -127,7 +127,7 @@ const emitNodes = async (socket, module) => {
 				// group:node:remove).
 				entry.admins = (members.users || [])
 					.filter((user) => { return user.role !== 'owner'; })
-					.map((user) => { return { email: user.email, displayName: user.displayName }; });
+					.map((user) => { return { email: user.email, name: user.name }; });
 				entry.groups = (members.groups || []).map((group) => { return { id: group.id, name: group.name }; });
 			}
 			return entry;

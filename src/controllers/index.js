@@ -24,8 +24,8 @@ router.post('/auth/mfa/setup', authController.mfaSetup);
 router.post('/auth/mfa/setup/verify', authController.mfaSetupVerify);
 router.post('/auth/mfa/verify', authController.mfaVerify);
 router.get('/push/vapid-public-key', pushController.getVapidKey);
-router.post('/push/subscribe', pushController.subscribe);
-router.post('/push/unsubscribe', pushController.unsubscribe);
+router.post('/push/enable', pushController.enable);
+router.post('/push/disable', pushController.disable);
 router.get('/nodes/:nodeId', nodeContentController.serveNodeContent);
 router.get('/nodes/:nodeId/*rest', nodeContentController.serveNodeContent);
 // `/` already falls through to the catch-all (static has index:false); this guards a direct

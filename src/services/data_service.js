@@ -46,7 +46,7 @@ function toPublicUser(user) {
 	return {
 		id: plain.id,
 		email: plain.email,
-		displayName: plain.displayName,
+		name: plain.name,
 		isDisabled: plain.isDisabled,
 		groups: plain.FleetGroups?.map((group) => {
 			return {
@@ -61,14 +61,35 @@ function toPublicUser(user) {
 class DataService {
 	static async initialize() {
 		await sequelize.sync();
+		await this.applyUserSchema();
 		await this.applyPushSchema();
 		return true;
 	}
 
-	// sync() creates the new fleet_push_subscriptions table but never alters the existing nodes table,
-	// so add the update-notification signature column idempotently (no-op on a fresh DB). Postgres-only.
+	// Rename the user tables' `displayName` column to `name`. sync() never renames an existing column,
+	// so do it idempotently: only when the old column exists and the new one doesn't (a no-op on a
+	// fresh DB, where sync already created `name`). Postgres-only.
+	static async applyUserSchema() {
+		await sequelize.query(`
+			DO $$
+			BEGIN
+				IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fleet_users' AND column_name = 'displayName')
+				   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fleet_users' AND column_name = 'name') THEN
+					ALTER TABLE "fleet_users" RENAME COLUMN "displayName" TO "name";
+				END IF;
+				IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fleet_pending_users' AND column_name = 'displayName')
+				   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fleet_pending_users' AND column_name = 'name') THEN
+					ALTER TABLE "fleet_pending_users" RENAME COLUMN "displayName" TO "name";
+				END IF;
+			END $$;
+		`);
+	}
+
+	// sync() creates the new fleet_push_subscriptions table but never alters the existing nodes /
+	// fleet_users tables, so add their new columns idempotently (no-op on a fresh DB). Postgres-only.
 	static async applyPushSchema() {
 		await sequelize.query('ALTER TABLE "nodes" ADD COLUMN IF NOT EXISTS "lastUpdateSignature" TEXT');
+		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "pushEnabled" BOOLEAN NOT NULL DEFAULT false');
 	}
 
 	static async getUsers() {
@@ -116,7 +137,7 @@ class DataService {
 		});
 	}
 
-	static async createUser({ email, displayName, password }) {
+	static async createUser({ email, name, password }) {
 		const normalizedEmail = normalizeEmail(email);
 		if (!normalizedEmail || !password) {
 			throw new Error('email and password are required.');
@@ -127,19 +148,19 @@ class DataService {
 		}
 		const user = await FleetUser.create({
 			email: normalizedEmail,
-			displayName: displayName || normalizedEmail,
+			name: name || normalizedEmail,
 			passwordHash: bcrypt.hashSync(password, PASSWORD_COST)
 		});
 		return toPublicUser(user);
 	}
 
-	static async updateUser({ email, displayName }) {
+	static async updateUser({ email, name }) {
 		const user = await this.getUserByEmail(email);
 		if (!user) {
 			throw new Error(`User ${email} not found.`);
 		}
-		if (displayName !== undefined) {
-			user.displayName = displayName;
+		if (name !== undefined) {
+			user.name = name;
 		}
 		await user.save();
 		return toPublicUser(user);
@@ -289,7 +310,7 @@ class DataService {
 	// Registers an account into the pending table and returns the verification token so the
 	// caller can email it. No fleet_users row and no session are created here — the account
 	// does not exist for login purposes until the link is clicked.
-	static async createPendingUser({ email, displayName, password }) {
+	static async createPendingUser({ email, name, password }) {
 		const normalizedEmail = normalizeEmail(email);
 		if (!normalizedEmail || !password) {
 			throw new Error('email and password are required.');
@@ -309,12 +330,12 @@ class DataService {
 		// expiry and invalidating the previous link.
 		await FleetPendingUser.upsert({
 			email: normalizedEmail,
-			displayName: displayName || normalizedEmail,
+			name: name || normalizedEmail,
 			passwordHash: bcrypt.hashSync(password, PASSWORD_COST),
 			verificationToken: token,
 			expiresAt
 		});
-		return { email: normalizedEmail, displayName: displayName || normalizedEmail, token, expiresAt };
+		return { email: normalizedEmail, name: name || normalizedEmail, token, expiresAt };
 	}
 
 	static async deletePendingUser(email) {
@@ -350,7 +371,7 @@ class DataService {
 		const user = await sequelize.transaction(async (transaction) => {
 			const created = await FleetUser.create({
 				email: pending.email,
-				displayName: pending.displayName,
+				name: pending.name,
 				// Reuse the hash captured at registration — the password is never re-collected.
 				passwordHash: pending.passwordHash
 			}, { transaction });
@@ -372,7 +393,7 @@ class DataService {
 			include: [{
 				model: FleetUser,
 				through: { attributes: ['role'] },
-				attributes: ['id', 'displayName', 'email']
+				attributes: ['id', 'name', 'email']
 			}, {
 				model: Node,
 				attributes: ['id', 'nodeId', 'name', 'lastSeenAt']
@@ -389,7 +410,7 @@ class DataService {
 					return {
 						id: user.id,
 						email: user.email,
-						displayName: user.displayName,
+						name: user.name,
 						role: user.FleetUserGroup?.role || 'member'
 					};
 				}) || [],
@@ -787,7 +808,7 @@ class DataService {
 			users: (plain.FleetUsers || []).map((user) => {
 				return {
 					email: user.email,
-					displayName: user.displayName,
+					name: user.name,
 					role: user.NodeAccess?.role || 'admin'
 				};
 			}),
@@ -859,6 +880,17 @@ class DataService {
 			return;
 		}
 		await FleetPushSubscription.destroy({ where: { endpoint } });
+	}
+
+	// Turning notifications off is account-wide, so drop every device's subscription in one go.
+	static async deletePushSubscriptionsForUser(userId) {
+		await FleetPushSubscription.destroy({ where: { fleetUserId: userId } });
+	}
+
+	// Account-level intent to receive notifications; read by each device on load to decide whether to
+	// obtain its own permission.
+	static async setUserPushEnabled(userId, enabled) {
+		await FleetUser.update({ pushEnabled: Boolean(enabled) }, { where: { id: userId } });
 	}
 
 	static async listPushSubscriptionsForUsers(userIds) {
@@ -940,7 +972,7 @@ class DataService {
 	}
 
 	/** Owner ids of the nodes `userId` is an invited member of, excluding the user's own nodes. An
-	 * owner's inventory renders that node's admins list (each admin's email + displayName), so these
+	 * owner's inventory renders that node's admins list (each admin's email + name), so these
 	 * owners must be refreshed whenever the member changes in a way that list reflects — being removed
 	 * (deletion) or renamed (update). Group-only access never appears in an admins list, so members
 	 * reached only through a group share are intentionally excluded. */
