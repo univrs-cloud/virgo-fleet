@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { authenticateSocketUser } from './socket_auth.js';
-import DataService from '../database/data_service.js';
+import DataService from '../services/data_service.js';
 
 const clientsByNodeId = new Map();
 

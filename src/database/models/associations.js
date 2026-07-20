@@ -5,6 +5,7 @@ import FleetPendingUser from './FleetPendingUser.js';
 import FleetUser from './FleetUser.js';
 import FleetGroup from './FleetGroup.js';
 import FleetRecoveryCode from './FleetRecoveryCode.js';
+import FleetPushSubscription from './FleetPushSubscription.js';
 import { sequelize } from '../index.js';
 import { DataTypes } from 'sequelize';
 
@@ -41,6 +42,9 @@ FleetSession.belongsTo(FleetUser, { foreignKey: 'fleetUserId', onDelete: 'CASCAD
 FleetUser.hasMany(FleetRecoveryCode, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
 FleetRecoveryCode.belongsTo(FleetUser, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
 
+FleetUser.hasMany(FleetPushSubscription, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
+FleetPushSubscription.belongsTo(FleetUser, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
+
 FleetUser.belongsToMany(Node, { through: NodeAccess, foreignKey: 'fleetUserId', otherKey: 'nodeId' });
 Node.belongsToMany(FleetUser, { through: NodeAccess, foreignKey: 'nodeId', otherKey: 'fleetUserId' });
 
@@ -69,6 +73,7 @@ export {
 	FleetSession,
 	FleetPendingUser,
 	FleetRecoveryCode,
+	FleetPushSubscription,
 	FleetUserGroup,
 	NodeAccess,
 	GroupNodeAccess

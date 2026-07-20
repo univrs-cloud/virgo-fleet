@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import DataService from '../../database/data_service.js';
+import DataService from '../../services/data_service.js';
 import { normalizeEmail } from '../../utils/email.js';
 import { buildConnectivitySegments } from '../../utils/connectivity.js';
 import { disconnectNodeUser, revokeStaleNodeAccess } from '../../utils/node_proxy.js';

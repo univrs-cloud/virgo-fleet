@@ -1,4 +1,4 @@
-import { sendEmail } from '../../utils/mailer.js';
+import MailService from '../../services/mailer.js';
 import { loadTemplate, renderTemplate, escapeHtml, getAppUrl } from '../helpers.js';
 
 function buildVerificationUrl(token) {
@@ -15,5 +15,5 @@ export async function sendSignupVerificationEmail({ to, displayName, token }) {
 		name: escapeHtml(displayName || to),
 		url: escapeHtml(url)
 	});
-	await sendEmail({ to, subject: 'Confirm your Univrs fleet account', html });
+	await MailService.sendEmail({ to, subject: 'Confirm your Univrs fleet account', html });
 }

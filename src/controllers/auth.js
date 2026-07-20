@@ -1,4 +1,4 @@
-import DataService from '../database/data_service.js';
+import DataService from '../services/data_service.js';
 import { clearAuthCookies, getSessionTokenFromCookieHeader, setAuthCookies } from '../utils/auth_cookies.js';
 import { sendSignupVerificationEmail } from '../emails/signup_verification/index.js';
 

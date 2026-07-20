@@ -7,7 +7,8 @@ import config from './config.js';
 import createApp from './src/app.js';
 import createServer from './src/server.js';
 import * as socket from './src/socket.js';
-import DataService from './src/database/data_service.js';
+import DataService from './src/services/data_service.js';
+import PushService from './src/services/push.js';
 import modules from './src/modules/index.js';
 
 async function main() {
@@ -15,6 +16,7 @@ async function main() {
 	const server = createServer(app);
 	socket.initializeSocket(server);
 	await DataService.initialize();
+	PushService.initialize();
 	await modules();
 
 	server.listen(config.server.port, () => {

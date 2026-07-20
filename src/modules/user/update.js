@@ -1,4 +1,4 @@
-import DataService from '../../database/data_service.js';
+import DataService from '../../services/data_service.js';
 
 // A fleet user can only update their own account: identity comes from the authenticated session,
 // never from client input, and no list of users is consulted.

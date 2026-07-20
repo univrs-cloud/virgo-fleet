@@ -1,5 +1,5 @@
 import * as trustedProxy from '../utils/trusted_proxy.js';
-import DataService from '../database/data_service.js';
+import DataService from '../services/data_service.js';
 import {
 	buildAccountFromUser,
 	clearAuthCookies,

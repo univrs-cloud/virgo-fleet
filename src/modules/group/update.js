@@ -1,4 +1,4 @@
-import DataService from '../../database/data_service.js';
+import DataService from '../../services/data_service.js';
 
 const onConnection = (socket, module) => {
 	socket.on('group:update', async (config, ack = () => {}) => {

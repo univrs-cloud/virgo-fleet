@@ -1,4 +1,4 @@
-import DataService from '../../database/data_service.js';
+import DataService from '../../services/data_service.js';
 import { revokeStaleNodeAccess } from '../../utils/node_proxy.js';
 
 const onConnection = (socket, module) => {

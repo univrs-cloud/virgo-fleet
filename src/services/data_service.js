@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
-import { sequelize } from './index.js';
+import { sequelize } from '../database/index.js';
 import {
 	Node,
 	NodeConnectivityEvent,
@@ -11,9 +11,10 @@ import {
 	FleetUser,
 	FleetGroup,
 	FleetRecoveryCode,
+	FleetPushSubscription,
 	FleetUserGroup,
 	GroupNodeAccess
-} from './models/associations.js';
+} from '../database/models/associations.js';
 import { normalizeEmail } from '../utils/email.js';
 import {
 	encryptSecret,
@@ -60,18 +61,14 @@ function toPublicUser(user) {
 class DataService {
 	static async initialize() {
 		await sequelize.sync();
-		await this.applyMfaSchema();
+		await this.applyPushSchema();
 		return true;
 	}
 
-	// Plain sync() creates missing tables (fleet_recovery_codes) but never alters existing ones, so
-	// add the MFA columns to pre-existing fleet_users/fleet_sessions idempotently. On a fresh DB sync
-	// already made them and these are no-ops. Postgres-only (ADD COLUMN IF NOT EXISTS).
-	static async applyMfaSchema() {
-		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "totpSecret" VARCHAR(255)');
-		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "totpPendingSecret" VARCHAR(255)');
-		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "totpEnabledAt" TIMESTAMP WITH TIME ZONE');
-		await sequelize.query('ALTER TABLE "fleet_sessions" ADD COLUMN IF NOT EXISTS "mfaState" VARCHAR(32) NOT NULL DEFAULT \'satisfied\'');
+	// sync() creates the new fleet_push_subscriptions table but never alters the existing nodes table,
+	// so add the update-notification signature column idempotently (no-op on a fresh DB). Postgres-only.
+	static async applyPushSchema() {
+		await sequelize.query('ALTER TABLE "nodes" ADD COLUMN IF NOT EXISTS "lastUpdateSignature" TEXT');
 	}
 
 	static async getUsers() {
@@ -818,6 +815,57 @@ class DataService {
 			ids.add(user.id);
 		}
 		return [...ids];
+	}
+
+	static async getNodeName(nodeId) {
+		const node = await Node.findOne({ where: { nodeId }, attributes: ['name'] });
+		return node?.name || null;
+	}
+
+	/** Signature of the update set the node's members were last notified about (empty string when the
+	 * node last reported no updates, null when never recorded). Persisted so reconnect re-reports and
+	 * process restarts don't re-notify. */
+	static async getNodeUpdateSignature(nodeId) {
+		const node = await Node.findOne({ where: { nodeId }, attributes: ['lastUpdateSignature'] });
+		return node?.lastUpdateSignature ?? null;
+	}
+
+	static async setNodeUpdateSignature(nodeId, signature) {
+		await Node.update({ lastUpdateSignature: signature }, { where: { nodeId } });
+	}
+
+	/** Upsert a browser's push subscription, keyed by its endpoint. A re-subscribe from the same
+	 * install carries the same endpoint, so we refresh its keys and (re)assign it to this user rather
+	 * than creating a duplicate. */
+	static async savePushSubscription(userId, subscription) {
+		const endpoint = subscription?.endpoint;
+		const p256dh = subscription?.keys?.p256dh;
+		const auth = subscription?.keys?.auth;
+		if (!endpoint || !p256dh || !auth) {
+			throw new Error('Invalid push subscription.');
+		}
+		const [row, created] = await FleetPushSubscription.findOrCreate({
+			where: { endpoint },
+			defaults: { endpoint, p256dh, auth, fleetUserId: userId }
+		});
+		if (!created) {
+			await row.update({ p256dh, auth, fleetUserId: userId });
+		}
+		return row;
+	}
+
+	static async deletePushSubscription(endpoint) {
+		if (!endpoint) {
+			return;
+		}
+		await FleetPushSubscription.destroy({ where: { endpoint } });
+	}
+
+	static async listPushSubscriptionsForUsers(userIds) {
+		if (!userIds?.length) {
+			return [];
+		}
+		return FleetPushSubscription.findAll({ where: { fleetUserId: { [Op.in]: userIds } } });
 	}
 
 	/** nodeIds of the nodes a user owns. Captured before deleting the owner so we can still notify

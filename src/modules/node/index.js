@@ -4,8 +4,9 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { registerFleetProxy, disconnectNodeClients } from '../../utils/node_proxy.js';
 import { registerNodeSocketGetter, attachNodeAssetHandler, failPendingRequestsForNode } from '../../utils/node_assets.js';
 import eventEmitter from '../../utils/event_emitter.js';
+import PushService from '../../services/push.js';
 import * as socket from '../../socket.js';
-import DataService from '../../database/data_service.js';
+import DataService from '../../services/data_service.js';
 import { authenticateSocketUser } from '../../utils/socket_auth.js';
 import { emitNodes } from './proxy.js';
 
@@ -125,6 +126,8 @@ class NodeModule {
 					DataService.listNodeMemberUserIds(socket.data.nodeId)
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node updates:', error); });
+					this.#notifyUpdatesAvailable(socket.data.nodeId, { system, apps })
+						.catch((error) => { console.error('Error pushing update notification:', error); });
 				});
 				socket.on('node:update', (update) => {
 					const sanitized = sanitizeUpdate(update);
@@ -211,6 +214,32 @@ class NodeModule {
 		} catch (error) {
 			console.error('Error broadcasting node presence:', error);
 		}
+	}
+
+	/** Web Push to a node's members when its set of available updates changes. A signature persisted on
+	 * the node row dedupes re-reports — a node re-sends node:updates on every reconnect, and the in-memory
+	 * updatesByNodeId is cleared on disconnect — so members are notified once per new update set rather
+	 * than on every reconnect or process restart. An empty set resets the stored signature (so the next
+	 * time updates appear it counts as new) without notifying. */
+	async #notifyUpdatesAvailable(nodeId, { system, apps }) {
+		const systemCount = Array.isArray(system) ? system.length : 0;
+		const appsCount = Array.isArray(apps) ? apps.length : 0;
+		const signature = (systemCount + appsCount) === 0 ? '' : JSON.stringify({ system, apps });
+		const previous = (await DataService.getNodeUpdateSignature(nodeId)) || '';
+		if (signature === previous) {
+			return;
+		}
+
+		await DataService.setNodeUpdateSignature(nodeId, signature);
+		if (!signature) {
+			return;
+		}
+		
+		const [name, userIds] = await Promise.all([
+			DataService.getNodeName(nodeId),
+			DataService.listNodeMemberUserIds(nodeId)
+		]);
+		await PushService.sendNodeUpdateNotification(userIds, { nodeId, name, systemCount, appsCount });
 	}
 
 	getNodeSocket(nodeId) {

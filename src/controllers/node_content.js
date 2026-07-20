@@ -1,4 +1,4 @@
-import DataService from '../database/data_service.js';
+import DataService from '../services/data_service.js';
 import { getSessionTokenFromCookieHeader } from '../utils/auth_cookies.js';
 import { fetchNodeAsset, streamNodeAsset } from '../utils/node_assets.js';
 import { applyFleetIdentity } from './static.js';

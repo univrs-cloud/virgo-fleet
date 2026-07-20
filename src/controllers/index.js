@@ -3,6 +3,7 @@ import express from 'express';
 import * as staticController from './static.js';
 import * as authController from './auth.js';
 import * as nodeContentController from './node_content.js';
+import * as pushController from './push.js';
 
 const router = express.Router();
 
@@ -22,6 +23,9 @@ router.post('/auth/verify', authController.verify);
 router.post('/auth/mfa/setup', authController.mfaSetup);
 router.post('/auth/mfa/setup/verify', authController.mfaSetupVerify);
 router.post('/auth/mfa/verify', authController.mfaVerify);
+router.get('/push/vapid-public-key', pushController.getVapidKey);
+router.post('/push/subscribe', pushController.subscribe);
+router.post('/push/unsubscribe', pushController.unsubscribe);
 router.get('/nodes/:nodeId', nodeContentController.serveNodeContent);
 router.get('/nodes/:nodeId/*rest', nodeContentController.serveNodeContent);
 // `/` already falls through to the catch-all (static has index:false); this guards a direct

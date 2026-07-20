@@ -1,5 +1,5 @@
 import BaseModule from '../base.js';
-import DataService from '../../database/data_service.js';
+import DataService from '../../services/data_service.js';
 
 /** A user only ever receives the groups they administer, so group existence, membership, and
  * shared-node details never leak to regular members or unrelated users. */

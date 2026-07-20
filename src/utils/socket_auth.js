@@ -1,4 +1,4 @@
-import DataService from '../database/data_service.js';
+import DataService from '../services/data_service.js';
 import { getSessionTokenFromCookieHeader } from './auth_cookies.js';
 import * as trustedProxy from './trusted_proxy.js';
 
