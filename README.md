@@ -10,8 +10,17 @@ SMTP_HOST='smtp.your.provider'
 SMTP_PORT='587'
 SMTP_SECURE='false'
 SMTP_USER='postmaster@your.domain'
-SMTP_PASS='your-smtp-password'
+SMTP_PASSWORD='your-smtp-password'
 SMTP_FROM='fleet@your.domain'
+VAPID_PUBLIC_KEY='generate-once-see-below'
+VAPID_PRIVATE_KEY='generate-once-see-below'
+VAPID_SUBJECT='mailto:fleet@your.domain'
+```
+
+Generate the VAPID keypair once (it powers Web Push update notifications to installed PWAs).
+Never regenerate it — rotating the keys invalidates every existing push subscription:
+```
+npx web-push generate-vapid-keys
 ```
 
 docker-compose.yml
@@ -30,8 +39,11 @@ services:
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_SECURE=${SMTP_SECURE:-false}
       - SMTP_USER=${SMTP_USER}
-      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
       - SMTP_FROM=${SMTP_FROM}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.allowNonRunning=true"

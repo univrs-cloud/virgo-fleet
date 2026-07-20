@@ -47,7 +47,7 @@ ENV DB_HOST="db" \
 #   SMTP_PORT    SMTP port (587 for STARTTLS, 465 for implicit TLS)
 #   SMTP_SECURE  "true" for implicit TLS (port 465), otherwise STARTTLS is used
 #   SMTP_USER    SMTP username (optional if the relay accepts unauthenticated mail)
-#   SMTP_PASS    SMTP password
+#   SMTP_PASSWORD    SMTP password
 #   SMTP_FROM    From address for verification emails (defaults to SMTP_USER)
 ENV DOMAIN="" \
     SMTP_HOST="" \
@@ -60,5 +60,16 @@ ENV DOMAIN="" \
 # (it's hashed to a 32-byte key). Strongly recommended — without it, TOTP secrets are stored
 # unencrypted and a DB dump would expose them. Runtime only, never baked into the image.
 #   MFA_SECRET_KEY   at-rest encryption key for TOTP secrets
+
+# Web Push (update notifications to installed PWAs). VAPID keypair, generated ONCE with
+# `npx web-push generate-vapid-keys` and provided at runtime — never baked into the image, and
+# never regenerated: rotating the keypair invalidates every stored push subscription (the push
+# service rejects sends with 403), silently killing notifications for all existing installs.
+#   VAPID_PUBLIC_KEY   public key; also served to the client for PushManager.subscribe()
+#   VAPID_PRIVATE_KEY  private key (secret); signs push messages
+#   VAPID_SUBJECT      contact URL required by spec, e.g. "mailto:admin@$DOMAIN"
+ENV VAPID_PUBLIC_KEY="" \
+    VAPID_PRIVATE_KEY="" \
+    VAPID_SUBJECT=""
 
 CMD ["node", "index.js"]
