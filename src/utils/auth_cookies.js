@@ -27,9 +27,10 @@ function getCookieOptions(req, { httpOnly = false } = {}) {
 }
 
 /**
- * There is no fleet-wide admin role; fleet accounts never carry the 'admins' group.
- * Access to a node's own system pages (in fleet mode) is instead granted per-node
- * based on node access, not on this cookie.
+ * Fleet accounts carry the 'admins' group so the reused node-shell UI renders its admin
+ * controls when a user opens a node they can access. This cookie flag is display-only:
+ * the real authorization is still enforced per-node on the server (canUserAccessNode gates
+ * every proxy namespace), so the group here never widens what a user can actually reach.
  */
 function mfaFlag(mfaState) {
 	if (mfaState === 'setup_required') {
@@ -46,7 +47,7 @@ function buildAccountFromUser(user, mfaState = 'satisfied') {
 		name: user.name || user.email,
 		user: user.email,
 		email: user.email,
-		groups: ['users'],
+		groups: ['admins'],
 		pushEnabled: Boolean(user.pushEnabled)
 	};
 	// Readable by the UI so the bootstrap can route a gated session to the forced setup/challenge
