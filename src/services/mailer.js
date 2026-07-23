@@ -13,7 +13,7 @@ class MailService {
 		const user = process.env.SMTP_USER;
 		const pass = process.env.SMTP_PASSWORD;
 		// SMTP_SECURE=true means implicit TLS (usually port 465); otherwise STARTTLS is negotiated.
-		const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true';
+		const secure = process.env.SMTP_SECURE?.toLowerCase() === 'true';
 		const from = process.env.SMTP_FROM || user;
 		return { host, port, user, pass, secure, from };
 	}
