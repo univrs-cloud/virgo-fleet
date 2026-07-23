@@ -89,6 +89,7 @@ class DataService {
 	// fleet_users tables, so add their new columns idempotently (no-op on a fresh DB). Postgres-only.
 	static async applyPushSchema() {
 		await sequelize.query('ALTER TABLE "nodes" ADD COLUMN IF NOT EXISTS "lastUpdateSignature" TEXT');
+		await sequelize.query('ALTER TABLE "nodes" ADD COLUMN IF NOT EXISTS "lastStorageSignature" TEXT');
 		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "pushEnabled" BOOLEAN NOT NULL DEFAULT false');
 	}
 
@@ -853,6 +854,17 @@ class DataService {
 
 	static async setNodeUpdateSignature(nodeId, signature) {
 		await Node.update({ lastUpdateSignature: signature }, { where: { nodeId } });
+	}
+
+	/** Signature of the per-pool health states the node's members were last notified about (null when
+	 * never recorded). Persisted so poll re-reports and process restarts don't re-notify. */
+	static async getNodeStorageSignature(nodeId) {
+		const node = await Node.findOne({ where: { nodeId }, attributes: ['lastStorageSignature'] });
+		return node?.lastStorageSignature ?? null;
+	}
+
+	static async setNodeStorageSignature(nodeId, signature) {
+		await Node.update({ lastStorageSignature: signature }, { where: { nodeId } });
 	}
 
 	/** Upsert a browser's push subscription, keyed by its endpoint. A re-subscribe from the same

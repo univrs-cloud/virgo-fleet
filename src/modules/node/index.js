@@ -146,6 +146,8 @@ class NodeModule {
 					DataService.listNodeMemberUserIds(socket.data.nodeId)
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node storage:', error); });
+					this.#notifyStorageHealth(socket.data.nodeId, storage)
+						.catch((error) => { console.error('Error pushing storage notification:', error); });
 				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
@@ -248,6 +250,63 @@ class NodeModule {
 			DataService.listNodeMemberUserIds(nodeId)
 		]);
 		await PushService.sendNodeUpdateNotification(userIds, { nodeId, name, systemCount, appsCount });
+	}
+
+	/** The summarised state of a pool, mirroring the fleet grid: a resilvering pool reads as rebuilding
+	 * (recovering) rather than the degraded health it reports underneath. */
+	#poolState(pool) {
+		const scan = pool.scanStats;
+		if (scan?.function?.toLowerCase() === 'resilver' && scan?.state?.toLowerCase() !== 'finished') {
+			return 'rebuilding';
+		}
+		const health = pool.properties?.health?.value?.toLowerCase();
+		if (!health || health === 'online') {
+			return 'online';
+		}
+		return health === 'degraded' ? 'degraded' : 'faulted';
+	}
+
+	/** Web Push to a node's members when a pool's health state changes. A signature of every pool's state
+	 * is persisted on the node row so the node re-reporting the same storage (it re-sends node:storage on
+	 * every poll) only notifies on an actual transition. Pools becoming/returning to online only notify
+	 * when they were previously unhealthy, so a healthy baseline (or a freshly adopted healthy node) is
+	 * silent while recoveries and regressions both surface. */
+	async #notifyStorageHealth(nodeId, storage) {
+		const pools = Array.isArray(storage) ? storage.filter((pool) => { return pool?.type?.toLowerCase() === 'pool'; }) : [];
+		const current = {};
+		for (const pool of pools) {
+			current[pool.name] = this.#poolState(pool);
+		}
+		const signature = JSON.stringify(Object.keys(current).sort().map((name) => { return [name, current[name]]; }));
+		const previous = await DataService.getNodeStorageSignature(nodeId);
+		if (signature === previous) {
+			return;
+		}
+
+		await DataService.setNodeStorageSignature(nodeId, signature);
+
+		const prev = previous ? Object.fromEntries(JSON.parse(previous)) : {};
+		const changes = [];
+		for (const [pool, state] of Object.entries(current)) {
+			const before = prev[pool];
+			if (before === state) {
+				continue;
+			}
+			// A pool arriving at / returning to online is only worth a push when it was previously unhealthy.
+			if (state === 'online' && (before === undefined || before === 'online')) {
+				continue;
+			}
+			changes.push({ pool, from: before, to: state });
+		}
+		if (!changes.length) {
+			return;
+		}
+
+		const [name, userIds] = await Promise.all([
+			DataService.getNodeName(nodeId),
+			DataService.listNodeMemberUserIds(nodeId)
+		]);
+		await PushService.sendNodeStorageNotification(userIds, { nodeId, name, changes });
 	}
 
 	getNodeSocket(nodeId) {

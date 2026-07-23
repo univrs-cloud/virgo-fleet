@@ -73,6 +73,38 @@ class PushService {
 		});
 		await Promise.all(subs.map((sub) => { return this.#sendToSubscription(sub, payload); }));
 	}
+
+	static #describeStorageChanges(changes) {
+		const describe = (change) => {
+			if (change.to === 'online') {
+				return `${change.pool} recovered`;
+			}
+			if (change.to === 'rebuilding') {
+				return `${change.pool} is rebuilding`;
+			}
+			return `${change.pool} is ${change.to}`;
+		};
+		return `Storage: ${changes.map(describe).join(', ')}.`;
+	}
+
+	/** Fan a "a pool's health changed" notification out to every push subscription of the given users.
+	 * `changes` is a list of { pool, from, to } state transitions. */
+	static async sendNodeStorageNotification(userIds, { nodeId, name, changes }) {
+		if (!this.#configured || !userIds?.length || !changes?.length) {
+			return;
+		}
+		const subs = await DataService.listPushSubscriptionsForUsers(userIds);
+		if (!subs.length) {
+			return;
+		}
+		const payload = JSON.stringify({
+			type: 'node-storage',
+			nodeId,
+			title: name || 'A node',
+			body: this.#describeStorageChanges(changes)
+		});
+		await Promise.all(subs.map((sub) => { return this.#sendToSubscription(sub, payload); }));
+	}
 }
 
 export default PushService;

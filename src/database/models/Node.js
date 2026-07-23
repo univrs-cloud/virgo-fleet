@@ -35,6 +35,12 @@ const Node = sequelize.define('Node', {
 	lastUpdateSignature: {
 		type: DataTypes.TEXT,
 		allowNull: true
+	},
+	// Signature of the per-pool health states last pushed to members, so the node re-reporting the same
+	// storage (it re-sends node:storage on every poll) only notifies when a pool's state actually changes.
+	lastStorageSignature: {
+		type: DataTypes.TEXT,
+		allowNull: true
 	}
 }, {
 	tableName: 'nodes'
