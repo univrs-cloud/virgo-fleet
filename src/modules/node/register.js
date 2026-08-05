@@ -22,37 +22,41 @@ const onConnection = (socket, module) => {
 				ack({ status: 'failed', message: RATE_LIMITED_MESSAGE });
 				return;
 			}
-			const serialNumber = String(config?.serialNumber || config?.nodeId || '').trim();
-			const name = String(config?.name || '').trim() || serialNumber;
+
+			const nodeId = String(config?.nodeId || '').trim();
+			const name = String(config?.name || '').trim() || nodeId;
 			const email = String(config?.email || '').trim().toLowerCase();
 			const password = String(config?.password || '');
-			if (!serialNumber || !email || !password) {
-				ack({ status: 'failed', message: 'serialNumber, email and password are required.' });
+			if (!nodeId || !email || !password) {
+				ack({ status: 'failed', message: 'nodeId, email and password are required.' });
 				return;
 			}
+
 			if (!emailRateLimiter.consume(email)) {
 				ack({ status: 'failed', message: RATE_LIMITED_MESSAGE });
 				return;
 			}
+
 			const owner = await DataService.verifyCredentials({ email, password });
 			if (!owner) {
 				ack({ status: 'failed', message: 'Invalid fleet credentials.' });
 				return;
 			}
+
 			const node = await DataService.upsertNode({
-				nodeId: serialNumber,
+				nodeId,
 				name,
 				ownerUserId: owner.id
 			});
 			await DataService.grantNodeAccess({
 				email: owner.email,
-				nodeId: serialNumber,
+				nodeId,
 				role: 'owner'
 			});
-			socket.data.nodeId = serialNumber;
-			module.setNodeSocket(serialNumber, socket);
+			socket.data.nodeId = nodeId;
+			module.setNodeSocket(nodeId, socket);
 			module.eventEmitter.emit('nodes:updated', { userIds: [owner.id] });
-			ack({ status: 'succeeded', nodeId: serialNumber, token: node.token });
+			ack({ status: 'succeeded', nodeId, token: node.token });
 		} catch (error) {
 			ack({ status: 'failed', message: error.message });
 		}

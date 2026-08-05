@@ -578,7 +578,10 @@ class DataService {
 		if (ownerUserId) {
 			node.ownerUserId = ownerUserId;
 		}
-		if (!node.token) {
+		// Every registration mints a fresh token, so completing one invalidates the previous
+		// credential: a token captured from an earlier registration stops working, and a node that
+		// re-registers is the only holder of the new one. The node persists what the ack returns.
+		if (!created) {
 			node.token = randomBytes(32).toString('hex');
 		}
 		await node.save();
