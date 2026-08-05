@@ -9,12 +9,12 @@ async function applyFleetUserSession(socket, sessionToken) {
 	const session = await DataService.getSessionByToken(sessionToken);
 	// A session that hasn't cleared MFA (setup_required / challenge_required) is not authenticated
 	// for anything on the socket — only the HTTP MFA endpoints can act on it.
-	if (!session?.FleetUser || session.mfaState !== 'satisfied') {
+	if (!session?.User || session.mfaState !== 'satisfied') {
 		return false;
 	}
 	socket.isAuthenticated = true;
-	socket.email = session.FleetUser.email;
-	socket.userId = session.FleetUser.id;
+	socket.email = session.User.email;
+	socket.userId = session.User.id;
 	return true;
 }
 

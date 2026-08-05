@@ -4,7 +4,7 @@ import { sequelize } from '../index.js';
 // One-time backup codes for a user who's lost their authenticator. Stored bcrypt-hashed (never
 // plaintext); usedAt is stamped when a code is consumed so it can't be replayed. A fresh set
 // replaces the old one whenever recovery codes are (re)generated.
-const FleetRecoveryCode = sequelize.define('FleetRecoveryCode', {
+const RecoveryCode = sequelize.define('RecoveryCode', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -19,7 +19,7 @@ const FleetRecoveryCode = sequelize.define('FleetRecoveryCode', {
 		allowNull: true
 	}
 }, {
-	tableName: 'fleet_recovery_codes'
+	tableName: 'recovery_codes'
 });
 
-export default FleetRecoveryCode;
+export default RecoveryCode;

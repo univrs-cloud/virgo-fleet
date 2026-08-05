@@ -1,7 +1,7 @@
 import { DataTypes } from 'sequelize';
 import { sequelize } from '../index.js';
 
-const FleetSession = sequelize.define('FleetSession', {
+const Session = sequelize.define('Session', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -25,7 +25,7 @@ const FleetSession = sequelize.define('FleetSession', {
 		defaultValue: 'satisfied'
 	}
 }, {
-	tableName: 'fleet_sessions'
+	tableName: 'sessions'
 });
 
-export default FleetSession;
+export default Session;

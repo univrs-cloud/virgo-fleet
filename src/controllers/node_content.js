@@ -13,7 +13,7 @@ const resolveFleetUser = async (req) => {
 	if (!session || session.mfaState !== 'satisfied') {
 		return null;
 	}
-	return session.FleetUser || null;
+	return session.User || null;
 };
 
 const injectNodeContext = (html, nodeId) => {

@@ -6,7 +6,7 @@ import { getSessionTokenFromCookieHeader, setAuthCookies } from '../utils/auth_c
 async function resolveSession(req) {
 	const token = getSessionTokenFromCookieHeader(req.headers.cookie);
 	const session = token ? await DataService.getSessionByToken(token) : null;
-	if (!session?.FleetUser || session.mfaState !== 'satisfied') {
+	if (!session?.User || session.mfaState !== 'satisfied') {
 		return null;
 	}
 	return session;
@@ -15,7 +15,7 @@ async function resolveSession(req) {
 // Re-issue the account cookie so the just-changed pushEnabled flag reaches the UI in the same
 // response (the authCookieHandler ran earlier in the request, before the change).
 function refreshAccountCookie(res, req, session) {
-	setAuthCookies(res, req, { token: session.token, user: session.FleetUser, mfaState: session.mfaState });
+	setAuthCookies(res, req, { token: session.token, user: session.User, mfaState: session.mfaState });
 }
 
 // The VAPID public key the client passes to PushManager.subscribe(). Not secret; 503 when push
@@ -38,7 +38,7 @@ async function enable(req, res) {
 			res.status(401).json({ status: 'failed', message: 'Not authenticated.' });
 			return;
 		}
-		const user = session.FleetUser;
+		const user = session.User;
 		await DataService.savePushSubscription(user.id, req.body);
 		await DataService.setUserPushEnabled(user.id, true);
 		user.pushEnabled = true;
@@ -58,7 +58,7 @@ async function disable(req, res) {
 			res.status(401).json({ status: 'failed', message: 'Not authenticated.' });
 			return;
 		}
-		const user = session.FleetUser;
+		const user = session.User;
 		await DataService.setUserPushEnabled(user.id, false);
 		await DataService.deletePushSubscriptionsForUser(user.id);
 		user.pushEnabled = false;

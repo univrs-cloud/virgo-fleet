@@ -59,7 +59,7 @@ async function login(req, res) {
 async function sessionFromRequest(req) {
 	const token = getSessionTokenFromCookieHeader(req.headers.cookie);
 	const session = token ? await DataService.getSessionByToken(token) : null;
-	return { token, session, user: session?.FleetUser || null };
+	return { token, session, user: session?.User || null };
 }
 
 // Begin TOTP enrollment — only reachable by a session that's actually in setup_required. Returns
@@ -130,7 +130,7 @@ async function changePassword(req, res) {
 	try {
 		const token = getSessionTokenFromCookieHeader(req.headers.cookie);
 		const session = token ? await DataService.getSessionByToken(token) : null;
-		const user = session?.FleetUser || null;
+		const user = session?.User || null;
 		if (!user || session.mfaState !== 'satisfied') {
 			res.status(401).json({ status: 'failed', message: 'Not authenticated.' });
 			return;

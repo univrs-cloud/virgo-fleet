@@ -1,7 +1,7 @@
 import { DataTypes } from 'sequelize';
 import { sequelize } from '../index.js';
 
-const FleetUser = sequelize.define('FleetUser', {
+const User = sequelize.define('User', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -49,7 +49,7 @@ const FleetUser = sequelize.define('FleetUser', {
 		defaultValue: false
 	}
 }, {
-	tableName: 'fleet_users'
+	tableName: 'users'
 });
 
-export default FleetUser;
+export default User;

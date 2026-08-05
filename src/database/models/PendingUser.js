@@ -2,10 +2,10 @@ import { DataTypes } from 'sequelize';
 import { sequelize } from '../index.js';
 
 // Holds accounts that have registered but not yet clicked the email verification link.
-// A row lives here — never in fleet_users — until verified, so login (which only reads
-// fleet_users) can never authenticate an unverified account. On verification the row is
-// promoted into fleet_users and deleted from here.
-const FleetPendingUser = sequelize.define('FleetPendingUser', {
+// A row lives here — never in `users` — until verified, so login (which only reads
+// `users`) can never authenticate an unverified account. On verification the row is
+// promoted into `users` and deleted from here.
+const PendingUser = sequelize.define('PendingUser', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -36,7 +36,7 @@ const FleetPendingUser = sequelize.define('FleetPendingUser', {
 		allowNull: false
 	}
 }, {
-	tableName: 'fleet_pending_users'
+	tableName: 'pending_users'
 });
 
-export default FleetPendingUser;
+export default PendingUser;

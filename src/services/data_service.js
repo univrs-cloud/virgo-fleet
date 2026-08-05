@@ -2,17 +2,18 @@ import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { sequelize } from '../database/index.js';
+import { runMigrations } from '../migrations/index.js';
 import {
 	Node,
 	NodeConnectivityEvent,
 	NodeAccess,
-	FleetSession,
-	FleetPendingUser,
-	FleetUser,
-	FleetGroup,
-	FleetRecoveryCode,
-	FleetPushSubscription,
-	FleetUserGroup,
+	Session,
+	PendingUser,
+	User,
+	Group,
+	RecoveryCode,
+	PushSubscription,
+	UserGroup,
 	GroupNodeAccess
 } from '../database/models/associations.js';
 import { normalizeEmail } from '../utils/email.js';
@@ -48,11 +49,11 @@ function toPublicUser(user) {
 		email: plain.email,
 		name: plain.name,
 		isDisabled: plain.isDisabled,
-		groups: plain.FleetGroups?.map((group) => {
+		groups: plain.Groups?.map((group) => {
 			return {
 				id: group.id,
 				name: group.name,
-				role: group.FleetUserGroup?.role || 'member'
+				role: group.UserGroup?.role || 'member'
 			};
 		}) || []
 	};
@@ -60,43 +61,17 @@ function toPublicUser(user) {
 
 class DataService {
 	static async initialize() {
+		// Migrations first: sync() only creates missing tables, so anything that renames or alters
+		// an existing one has to land before sync sees it.
+		await runMigrations();
 		await sequelize.sync();
-		await this.applyUserSchema();
-		await this.applyPushSchema();
 		return true;
 	}
 
-	// Rename the user tables' `displayName` column to `name`. sync() never renames an existing column,
-	// so do it idempotently: only when the old column exists and the new one doesn't (a no-op on a
-	// fresh DB, where sync already created `name`). Postgres-only.
-	static async applyUserSchema() {
-		await sequelize.query(`
-			DO $$
-			BEGIN
-				IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fleet_users' AND column_name = 'displayName')
-				   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fleet_users' AND column_name = 'name') THEN
-					ALTER TABLE "fleet_users" RENAME COLUMN "displayName" TO "name";
-				END IF;
-				IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fleet_pending_users' AND column_name = 'displayName')
-				   AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'fleet_pending_users' AND column_name = 'name') THEN
-					ALTER TABLE "fleet_pending_users" RENAME COLUMN "displayName" TO "name";
-				END IF;
-			END $$;
-		`);
-	}
-
-	// sync() creates the new fleet_push_subscriptions table but never alters the existing nodes /
-	// fleet_users tables, so add their new columns idempotently (no-op on a fresh DB). Postgres-only.
-	static async applyPushSchema() {
-		await sequelize.query('ALTER TABLE "nodes" ADD COLUMN IF NOT EXISTS "lastUpdateSignature" TEXT');
-		await sequelize.query('ALTER TABLE "nodes" ADD COLUMN IF NOT EXISTS "lastStorageSignature" TEXT');
-		await sequelize.query('ALTER TABLE "fleet_users" ADD COLUMN IF NOT EXISTS "pushEnabled" BOOLEAN NOT NULL DEFAULT false');
-	}
-
 	static async getUsers() {
-		const users = await FleetUser.findAll({
+		const users = await User.findAll({
 			include: [{
-				model: FleetGroup,
+				model: Group,
 				through: { attributes: ['role'] }
 			}],
 			order: [['email', 'ASC']]
@@ -109,10 +84,10 @@ class DataService {
 		if (!normalizedEmail) {
 			return null;
 		}
-		return FleetUser.findOne({
+		return User.findOne({
 			where: { email: normalizedEmail },
 			include: [{
-				model: FleetGroup,
+				model: Group,
 				through: { attributes: ['role'] }
 			}]
 		});
@@ -130,9 +105,9 @@ class DataService {
 	}
 
 	static async getUserById(id) {
-		return FleetUser.findByPk(id, {
+		return User.findByPk(id, {
 			include: [{
-				model: FleetGroup,
+				model: Group,
 				through: { attributes: ['role'] }
 			}]
 		});
@@ -147,7 +122,7 @@ class DataService {
 		if (existing) {
 			throw new Error('User already exists.');
 		}
-		const user = await FleetUser.create({
+		const user = await User.create({
 			email: normalizedEmail,
 			name: name || normalizedEmail,
 			passwordHash: bcrypt.hashSync(password, PASSWORD_COST)
@@ -185,7 +160,7 @@ class DataService {
 		user.passwordHash = bcrypt.hashSync(password, PASSWORD_COST);
 		await user.save();
 		// Invalidate every existing session so a changed password logs out all devices.
-		await FleetSession.destroy({ where: { fleetUserId: user.id } });
+		await Session.destroy({ where: { userId: user.id } });
 		return true;
 	}
 
@@ -193,35 +168,35 @@ class DataService {
 		const token = randomBytes(48).toString('hex');
 		const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 		// Opportunistically clear this user's expired sessions whenever they log in.
-		await FleetSession.destroy({ where: { fleetUserId: userId, expiresAt: { [Op.lt]: new Date() } } });
-		await FleetSession.create({
+		await Session.destroy({ where: { userId: userId, expiresAt: { [Op.lt]: new Date() } } });
+		await Session.create({
 			token,
 			expiresAt,
-			fleetUserId: userId,
+			userId: userId,
 			mfaState
 		});
 		return { token, expiresAt };
 	}
 
 	static async setSessionMfaState(token, mfaState) {
-		await FleetSession.update({ mfaState }, { where: { token } });
+		await Session.update({ mfaState }, { where: { token } });
 	}
 
 	static async getSessionByToken(token) {
 		if (!token) {
 			return null;
 		}
-		return FleetSession.findOne({
+		return Session.findOne({
 			where: {
 				token,
 				expiresAt: { [Op.gt]: new Date() }
 			},
-			include: [FleetUser]
+			include: [User]
 		});
 	}
 
 	static async deleteSession(token) {
-		await FleetSession.destroy({ where: { token } });
+		await Session.destroy({ where: { token } });
 	}
 
 	static async login({ email, password }) {
@@ -246,7 +221,7 @@ class DataService {
 	/** Begin (or restart) TOTP enrollment: generate a fresh secret, stash it as the pending secret,
 	 * and return the plaintext secret + otpauth URI (for the QR). Not active until confirmed. */
 	static async beginTotpSetup(userId) {
-		const user = await FleetUser.findByPk(userId);
+		const user = await User.findByPk(userId);
 		if (!user) {
 			throw new Error('User not found.');
 		}
@@ -260,7 +235,7 @@ class DataService {
 	 * becomes the active one, TOTP is marked enabled, and a fresh set of recovery codes is issued
 	 * (returned in plaintext once). Atomic, so TOTP is never enabled without recovery codes. */
 	static async confirmTotpSetup(userId, code) {
-		const user = await FleetUser.findByPk(userId);
+		const user = await User.findByPk(userId);
 		if (!user || !user.totpPendingSecret) {
 			throw new Error('No TOTP setup in progress.');
 		}
@@ -273,9 +248,9 @@ class DataService {
 			user.totpPendingSecret = null;
 			user.totpEnabledAt = new Date();
 			await user.save({ transaction });
-			await FleetRecoveryCode.destroy({ where: { fleetUserId: userId }, transaction });
-			await FleetRecoveryCode.bulkCreate(
-				recoveryCodes.map((plain) => { return { fleetUserId: userId, codeHash: hashRecoveryCode(plain) }; }),
+			await RecoveryCode.destroy({ where: { userId: userId }, transaction });
+			await RecoveryCode.bulkCreate(
+				recoveryCodes.map((plain) => { return { userId: userId, codeHash: hashRecoveryCode(plain) }; }),
 				{ transaction }
 			);
 		});
@@ -284,7 +259,7 @@ class DataService {
 
 	/** Verify a TOTP code for the login challenge (against the active secret). */
 	static async verifyTotpChallenge(userId, code) {
-		const user = await FleetUser.findByPk(userId);
+		const user = await User.findByPk(userId);
 		if (!user || !user.totpSecret) {
 			return false;
 		}
@@ -293,7 +268,7 @@ class DataService {
 
 	/** Verify and consume a one-time recovery code (bcrypt-compared, then stamped used). */
 	static async consumeRecoveryCode(userId, code) {
-		const rows = await FleetRecoveryCode.findAll({ where: { fleetUserId: userId, usedAt: null } });
+		const rows = await RecoveryCode.findAll({ where: { userId: userId, usedAt: null } });
 		for (const row of rows) {
 			if (verifyRecoveryCode(code, row.codeHash)) {
 				row.usedAt = new Date();
@@ -305,11 +280,11 @@ class DataService {
 	}
 
 	static async countRemainingRecoveryCodes(userId) {
-		return FleetRecoveryCode.count({ where: { fleetUserId: userId, usedAt: null } });
+		return RecoveryCode.count({ where: { userId: userId, usedAt: null } });
 	}
 
 	// Registers an account into the pending table and returns the verification token so the
-	// caller can email it. No fleet_users row and no session are created here — the account
+	// caller can email it. No `users` row and no session are created here — the account
 	// does not exist for login purposes until the link is clicked.
 	static async createPendingUser({ email, name, password }) {
 		const normalizedEmail = normalizeEmail(email);
@@ -323,13 +298,13 @@ class DataService {
 		}
 		// Housekeeping: drop pending rows whose links have already lapsed so the table doesn't
 		// accumulate dead registrations.
-		await FleetPendingUser.destroy({ where: { expiresAt: { [Op.lt]: new Date() } } });
+		await PendingUser.destroy({ where: { expiresAt: { [Op.lt]: new Date() } } });
 		const token = randomBytes(48).toString('hex');
 		const expiresAt = new Date(Date.now() + PENDING_TTL_MS);
 		// Upsert keyed on the unique email: a repeat signup before verification (e.g. the first
 		// email never arrived) overwrites the pending row in place, issuing a fresh token and
 		// expiry and invalidating the previous link.
-		await FleetPendingUser.upsert({
+		await PendingUser.upsert({
 			email: normalizedEmail,
 			name: name || normalizedEmail,
 			passwordHash: bcrypt.hashSync(password, PASSWORD_COST),
@@ -344,17 +319,17 @@ class DataService {
 		if (!normalizedEmail) {
 			return false;
 		}
-		await FleetPendingUser.destroy({ where: { email: normalizedEmail } });
+		await PendingUser.destroy({ where: { email: normalizedEmail } });
 		return true;
 	}
 
-	// Promotes a pending account into fleet_users and logs it in. The move and the pending-row
+	// Promotes a pending account into `users` and logs it in. The move and the pending-row
 	// deletion run in one transaction so a verified account can never exist in both tables.
 	static async verifyPendingUser(token) {
 		if (!token) {
 			throw new Error('This verification link is invalid or has expired.');
 		}
-		const pending = await FleetPendingUser.findOne({
+		const pending = await PendingUser.findOne({
 			where: {
 				verificationToken: token,
 				expiresAt: { [Op.gt]: new Date() }
@@ -370,7 +345,7 @@ class DataService {
 			throw new Error('User already exists.');
 		}
 		const user = await sequelize.transaction(async (transaction) => {
-			const created = await FleetUser.create({
+			const created = await User.create({
 				email: pending.email,
 				name: pending.name,
 				// Reuse the hash captured at registration — the password is never re-collected.
@@ -390,9 +365,9 @@ class DataService {
 	}
 
 	static async getGroups() {
-		const groups = await FleetGroup.findAll({
+		const groups = await Group.findAll({
 			include: [{
-				model: FleetUser,
+				model: User,
 				through: { attributes: ['role'] },
 				attributes: ['id', 'name', 'email']
 			}, {
@@ -407,12 +382,12 @@ class DataService {
 				id: plain.id,
 				name: plain.name,
 				description: plain.description,
-				users: plain.FleetUsers?.map((user) => {
+				users: plain.Users?.map((user) => {
 					return {
 						id: user.id,
 						email: user.email,
 						name: user.name,
-						role: user.FleetUserGroup?.role || 'member'
+						role: user.UserGroup?.role || 'member'
 					};
 				}) || [],
 				nodes: plain.Nodes?.map((node) => {
@@ -434,11 +409,11 @@ class DataService {
 		if (!userId) {
 			return [];
 		}
-		const memberships = await FleetUserGroup.findAll({
-			where: { fleetUserId: userId, role: 'manager' },
-			attributes: ['fleetGroupId']
+		const memberships = await UserGroup.findAll({
+			where: { userId: userId, role: 'manager' },
+			attributes: ['groupId']
 		});
-		const groupIds = new Set(memberships.map((membership) => { return membership.fleetGroupId; }));
+		const groupIds = new Set(memberships.map((membership) => { return membership.groupId; }));
 		if (groupIds.size === 0) {
 			return [];
 		}
@@ -448,19 +423,19 @@ class DataService {
 
 	/** Ids of a group's members, for targeting broadcasts when a node is shared with the group. */
 	static async listGroupMemberUserIds(groupId) {
-		const group = await FleetGroup.findByPk(groupId, {
-			include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+		const group = await Group.findByPk(groupId, {
+			include: [{ model: User, attributes: ['id'], through: { attributes: [] } }]
 		});
 		if (!group) {
 			return [];
 		}
-		return (group.FleetUsers || []).map((user) => { return user.id; });
+		return (group.Users || []).map((user) => { return user.id; });
 	}
 
 	/** String nodeIds of the nodes a group grants access to (via GroupNodeAccess). Captured before a
 	 * group membership/existence change so access to those nodes can be re-evaluated and enforced. */
 	static async listGroupNodeIds(groupId) {
-		const group = await FleetGroup.findByPk(groupId, {
+		const group = await Group.findByPk(groupId, {
 			include: [{ model: Node, attributes: ['nodeId'], through: { attributes: [] } }]
 		});
 		if (!group) {
@@ -477,20 +452,20 @@ class DataService {
 		// Names are unique per creator, not globally: different users may each have a group with the
 		// same name, but a single user cannot create two groups sharing a name.
 		if (createdByUserId) {
-			const existing = await FleetGroup.findOne({ where: { name: normalizedName, createdByUserId } });
+			const existing = await Group.findOne({ where: { name: normalizedName, createdByUserId } });
 			if (existing) {
 				throw new Error('You already have a group with that name.');
 			}
 		}
-		const group = await FleetGroup.create({
+		const group = await Group.create({
 			name: normalizedName,
 			description: description || null,
 			createdByUserId: createdByUserId || null
 		});
 		if (createdByUserId) {
-			const creator = await FleetUser.findByPk(createdByUserId);
+			const creator = await User.findByPk(createdByUserId);
 			if (creator) {
-				await group.addFleetUser(creator, { through: { role: 'manager' } });
+				await group.addUser(creator, { through: { role: 'manager' } });
 			}
 		}
 		return group;
@@ -503,14 +478,14 @@ class DataService {
 		if (!userId || !groupId) {
 			return false;
 		}
-		const membership = await FleetUserGroup.findOne({
-			where: { fleetUserId: userId, fleetGroupId: groupId }
+		const membership = await UserGroup.findOne({
+			where: { userId: userId, groupId: groupId }
 		});
 		return membership?.role === 'manager';
 	}
 
 	static async updateGroup({ groupId, description, newName }) {
-		const group = await FleetGroup.findByPk(groupId);
+		const group = await Group.findByPk(groupId);
 		if (!group) {
 			throw new Error(`Group ${groupId} not found.`);
 		}
@@ -525,7 +500,7 @@ class DataService {
 	}
 
 	static async deleteGroup(groupId) {
-		const group = await FleetGroup.findByPk(groupId);
+		const group = await Group.findByPk(groupId);
 		if (!group) {
 			throw new Error(`Group ${groupId} not found.`);
 		}
@@ -534,22 +509,22 @@ class DataService {
 	}
 
 	static async addUserToGroup({ groupId, email, role = 'member' }) {
-		const group = await FleetGroup.findByPk(groupId);
+		const group = await Group.findByPk(groupId);
 		const user = await this.getUserByEmail(email);
 		if (!group || !user) {
 			throw new Error('Group or user not found.');
 		}
-		await group.addFleetUser(user, { through: { role } });
+		await group.addUser(user, { through: { role } });
 		return true;
 	}
 
 	static async removeUserFromGroup({ groupId, email }) {
-		const group = await FleetGroup.findByPk(groupId);
+		const group = await Group.findByPk(groupId);
 		const user = await this.getUserByEmail(email);
 		if (!group || !user) {
 			throw new Error('Group or user not found.');
 		}
-		await group.removeFleetUser(user);
+		await group.removeUser(user);
 		return true;
 	}
 
@@ -674,7 +649,7 @@ class DataService {
 		if (!user || !node) {
 			throw new Error('User or node not found.');
 		}
-		await node.addFleetUser(user, { through: { role } });
+		await node.addUser(user, { through: { role } });
 		return true;
 	}
 
@@ -687,12 +662,12 @@ class DataService {
 		if (node.ownerUserId === user.id) {
 			throw new Error('Node owner cannot be removed.');
 		}
-		await node.removeFleetUser(user);
+		await node.removeUser(user);
 		return true;
 	}
 
 	static async grantGroupNodeAccess({ groupId, nodeId }) {
-		const group = await FleetGroup.findByPk(groupId);
+		const group = await Group.findByPk(groupId);
 		const node = await Node.findOne({ where: { nodeId } });
 		if (!group || !node) {
 			throw new Error('Group or node not found.');
@@ -702,7 +677,7 @@ class DataService {
 	}
 
 	static async revokeGroupNodeAccess({ groupId, nodeId }) {
-		const group = await FleetGroup.findByPk(groupId);
+		const group = await Group.findByPk(groupId);
 		const node = await Node.findOne({ where: { nodeId } });
 		if (!group || !node) {
 			throw new Error('Group or node not found.');
@@ -721,29 +696,29 @@ class DataService {
 		const [node, group] = await Promise.all([
 			Node.findOne({
 				where: { nodeId },
-				include: [{ model: FleetUser, attributes: ['id'], through: { attributes: ['role'] } }]
+				include: [{ model: User, attributes: ['id'], through: { attributes: ['role'] } }]
 			}),
-			FleetGroup.findByPk(groupId, {
-				include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+			Group.findByPk(groupId, {
+				include: [{ model: User, attributes: ['id'], through: { attributes: [] } }]
 			})
 		]);
 		if (!node || !group) {
 			return [];
 		}
-		const groupMemberIds = new Set((group.FleetUsers || []).map((user) => { return user.id; }));
-		const redundant = (node.FleetUsers || []).filter((user) => {
+		const groupMemberIds = new Set((group.Users || []).map((user) => { return user.id; }));
+		const redundant = (node.Users || []).filter((user) => {
 			return user.id !== node.ownerUserId && user.NodeAccess?.role !== 'owner' && groupMemberIds.has(user.id);
 		});
 		if (redundant.length) {
-			await node.removeFleetUsers(redundant);
+			await node.removeUsers(redundant);
 		}
 		return redundant.map((user) => { return user.id; });
 	}
 
 	static async listAccessibleNodes(userId) {
-		const user = await FleetUser.findByPk(userId, {
+		const user = await User.findByPk(userId, {
 			include: [{
-				model: FleetGroup,
+				model: Group,
 				include: [Node]
 			}, Node]
 		});
@@ -760,7 +735,7 @@ class DataService {
 				isOwner: node.ownerUserId === userId
 			});
 		}
-		for (const group of user.FleetGroups || []) {
+		for (const group of user.Groups || []) {
 			for (const node of group.Nodes || []) {
 				if (nodes.has(node.nodeId)) {
 					continue;
@@ -793,11 +768,11 @@ class DataService {
 			where: { nodeId },
 			include: [
 				{
-					model: FleetUser,
+					model: User,
 					through: { attributes: ['role'] }
 				},
 				{
-					model: FleetGroup,
+					model: Group,
 					attributes: ['id', 'name']
 				}
 			]
@@ -809,14 +784,14 @@ class DataService {
 		return {
 			nodeId: plain.nodeId,
 			name: plain.name,
-			users: (plain.FleetUsers || []).map((user) => {
+			users: (plain.Users || []).map((user) => {
 				return {
 					email: user.email,
 					name: user.name,
 					role: user.NodeAccess?.role || 'admin'
 				};
 			}),
-			groups: (plain.FleetGroups || []).map((group) => {
+			groups: (plain.Groups || []).map((group) => {
 				return { id: group.id, name: group.name };
 			})
 		};
@@ -827,7 +802,7 @@ class DataService {
 	static async listNodeMemberUserIds(nodeId) {
 		const node = await Node.findOne({
 			where: { nodeId },
-			include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+			include: [{ model: User, attributes: ['id'], through: { attributes: [] } }]
 		});
 		if (!node) {
 			return [];
@@ -836,7 +811,7 @@ class DataService {
 		if (node.ownerUserId) {
 			ids.add(node.ownerUserId);
 		}
-		for (const user of node.FleetUsers || []) {
+		for (const user of node.Users || []) {
 			ids.add(user.id);
 		}
 		return [...ids];
@@ -880,12 +855,12 @@ class DataService {
 		if (!endpoint || !p256dh || !auth) {
 			throw new Error('Invalid push subscription.');
 		}
-		const [row, created] = await FleetPushSubscription.findOrCreate({
+		const [row, created] = await PushSubscription.findOrCreate({
 			where: { endpoint },
-			defaults: { endpoint, p256dh, auth, fleetUserId: userId }
+			defaults: { endpoint, p256dh, auth, userId: userId }
 		});
 		if (!created) {
-			await row.update({ p256dh, auth, fleetUserId: userId });
+			await row.update({ p256dh, auth, userId: userId });
 		}
 		return row;
 	}
@@ -894,25 +869,25 @@ class DataService {
 		if (!endpoint) {
 			return;
 		}
-		await FleetPushSubscription.destroy({ where: { endpoint } });
+		await PushSubscription.destroy({ where: { endpoint } });
 	}
 
 	// Turning notifications off is account-wide, so drop every device's subscription in one go.
 	static async deletePushSubscriptionsForUser(userId) {
-		await FleetPushSubscription.destroy({ where: { fleetUserId: userId } });
+		await PushSubscription.destroy({ where: { userId: userId } });
 	}
 
 	// Account-level intent to receive notifications; read by each device on load to decide whether to
 	// obtain its own permission.
 	static async setUserPushEnabled(userId, enabled) {
-		await FleetUser.update({ pushEnabled: Boolean(enabled) }, { where: { id: userId } });
+		await User.update({ pushEnabled: Boolean(enabled) }, { where: { id: userId } });
 	}
 
 	static async listPushSubscriptionsForUsers(userIds) {
 		if (!userIds?.length) {
 			return [];
 		}
-		return FleetPushSubscription.findAll({ where: { fleetUserId: { [Op.in]: userIds } } });
+		return PushSubscription.findAll({ where: { userId: { [Op.in]: userIds } } });
 	}
 
 	/** nodeIds of the nodes a user owns. Captured before deleting the owner so we can still notify
@@ -944,11 +919,11 @@ class DataService {
 		const ownedNodes = await Node.findAll({
 			where: { ownerUserId: userId },
 			include: [
-				{ model: FleetUser, attributes: ['id'], through: { attributes: [] } },
+				{ model: User, attributes: ['id'], through: { attributes: [] } },
 				{
-					model: FleetGroup,
+					model: Group,
 					attributes: ['id'],
-					include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+					include: [{ model: User, attributes: ['id'], through: { attributes: [] } }]
 				}
 			]
 		});
@@ -956,22 +931,22 @@ class DataService {
 			if (node.ownerUserId) {
 				affected.add(node.ownerUserId);
 			}
-			for (const user of node.FleetUsers || []) {
+			for (const user of node.Users || []) {
 				affected.add(user.id);
 			}
-			for (const group of node.FleetGroups || []) {
-				for (const user of group.FleetUsers || []) {
+			for (const group of node.Groups || []) {
+				for (const user of group.Users || []) {
 					affected.add(user.id);
 				}
 			}
 		}
 
-		const createdGroups = await FleetGroup.findAll({
+		const createdGroups = await Group.findAll({
 			where: { createdByUserId: userId },
-			include: [{ model: FleetUser, attributes: ['id'], through: { attributes: [] } }]
+			include: [{ model: User, attributes: ['id'], through: { attributes: [] } }]
 		});
 		for (const group of createdGroups) {
-			for (const user of group.FleetUsers || []) {
+			for (const user of group.Users || []) {
 				affected.add(user.id);
 			}
 		}
@@ -998,7 +973,7 @@ class DataService {
 		const nodes = await Node.findAll({
 			attributes: ['ownerUserId'],
 			include: [{
-				model: FleetUser,
+				model: User,
 				attributes: [],
 				through: { attributes: [] },
 				where: { id: userId }
@@ -1018,8 +993,8 @@ class DataService {
 		if (!node) {
 			throw new Error(`Node ${nodeId} not found.`);
 		}
-		await node.setFleetUsers([]);
-		await node.setFleetGroups([]);
+		await node.setUsers([]);
+		await node.setGroups([]);
 		await node.destroy();
 		return true;
 	}

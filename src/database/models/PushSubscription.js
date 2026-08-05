@@ -5,7 +5,7 @@ import { sequelize } from '../index.js';
 // (unique per install, so re-subscribing upserts rather than duplicating); p256dh + auth are the
 // client keys web-push needs to encrypt a payload. Rows are pruned when the push service reports the
 // subscription gone (404/410), and cascade away with the owning user.
-const FleetPushSubscription = sequelize.define('FleetPushSubscription', {
+const PushSubscription = sequelize.define('PushSubscription', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -25,7 +25,7 @@ const FleetPushSubscription = sequelize.define('FleetPushSubscription', {
 		allowNull: false
 	}
 }, {
-	tableName: 'fleet_push_subscriptions'
+	tableName: 'push_subscriptions'
 });
 
-export default FleetPushSubscription;
+export default PushSubscription;

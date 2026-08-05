@@ -1,7 +1,7 @@
 import { DataTypes } from 'sequelize';
 import { sequelize } from '../index.js';
 
-const FleetGroup = sequelize.define('FleetGroup', {
+const Group = sequelize.define('Group', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -20,17 +20,17 @@ const FleetGroup = sequelize.define('FleetGroup', {
 		allowNull: true
 	}
 }, {
-	tableName: 'fleet_groups',
+	tableName: 'groups',
 	// Group names are unique per creator, not globally: different users may share a name, but a
 	// single user cannot have two groups with the same name. (NULLs compare as distinct in a
 	// unique index, so legacy groups without a creator are exempt.)
 	indexes: [
 		{
-			name: 'ux_fleet_groups_creator_name',
+			name: 'ux_groups_creator_name',
 			unique: true,
 			fields: ['createdByUserId', 'name']
 		}
 	]
 });
 
-export default FleetGroup;
+export default Group;

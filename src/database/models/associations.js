@@ -1,22 +1,22 @@
 import Node from './Node.js';
 import NodeConnectivityEvent from './NodeConnectivityEvent.js';
-import FleetSession from './FleetSession.js';
-import FleetPendingUser from './FleetPendingUser.js';
-import FleetUser from './FleetUser.js';
-import FleetGroup from './FleetGroup.js';
-import FleetRecoveryCode from './FleetRecoveryCode.js';
-import FleetPushSubscription from './FleetPushSubscription.js';
+import Session from './Session.js';
+import PendingUser from './PendingUser.js';
+import User from './User.js';
+import Group from './Group.js';
+import RecoveryCode from './RecoveryCode.js';
+import PushSubscription from './PushSubscription.js';
 import { sequelize } from '../index.js';
 import { DataTypes } from 'sequelize';
 
-const FleetUserGroup = sequelize.define('FleetUserGroup', {
+const UserGroup = sequelize.define('UserGroup', {
 	role: {
 		type: DataTypes.ENUM('member', 'manager'),
 		allowNull: false,
 		defaultValue: 'member'
 	}
 }, {
-	tableName: 'fleet_user_groups'
+	tableName: 'user_groups'
 });
 
 const NodeAccess = sequelize.define('NodeAccess', {
@@ -33,32 +33,32 @@ const GroupNodeAccess = sequelize.define('GroupNodeAccess', {}, {
 	tableName: 'group_node_accesses'
 });
 
-FleetUser.belongsToMany(FleetGroup, { through: FleetUserGroup, foreignKey: 'fleetUserId', otherKey: 'fleetGroupId' });
-FleetGroup.belongsToMany(FleetUser, { through: FleetUserGroup, foreignKey: 'fleetGroupId', otherKey: 'fleetUserId' });
+User.belongsToMany(Group, { through: UserGroup, foreignKey: 'userId', otherKey: 'groupId' });
+Group.belongsToMany(User, { through: UserGroup, foreignKey: 'groupId', otherKey: 'userId' });
 
-FleetUser.hasMany(FleetSession, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
-FleetSession.belongsTo(FleetUser, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
+User.hasMany(Session, { foreignKey: 'userId', onDelete: 'CASCADE' });
+Session.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
 
-FleetUser.hasMany(FleetRecoveryCode, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
-FleetRecoveryCode.belongsTo(FleetUser, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
+User.hasMany(RecoveryCode, { foreignKey: 'userId', onDelete: 'CASCADE' });
+RecoveryCode.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
 
-FleetUser.hasMany(FleetPushSubscription, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
-FleetPushSubscription.belongsTo(FleetUser, { foreignKey: 'fleetUserId', onDelete: 'CASCADE' });
+User.hasMany(PushSubscription, { foreignKey: 'userId', onDelete: 'CASCADE' });
+PushSubscription.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
 
-FleetUser.belongsToMany(Node, { through: NodeAccess, foreignKey: 'fleetUserId', otherKey: 'nodeId' });
-Node.belongsToMany(FleetUser, { through: NodeAccess, foreignKey: 'nodeId', otherKey: 'fleetUserId' });
+User.belongsToMany(Node, { through: NodeAccess, foreignKey: 'userId', otherKey: 'nodeId' });
+Node.belongsToMany(User, { through: NodeAccess, foreignKey: 'nodeId', otherKey: 'userId' });
 
-FleetGroup.belongsToMany(Node, { through: GroupNodeAccess, foreignKey: 'fleetGroupId', otherKey: 'nodeId' });
-Node.belongsToMany(FleetGroup, { through: GroupNodeAccess, foreignKey: 'nodeId', otherKey: 'fleetGroupId' });
+Group.belongsToMany(Node, { through: GroupNodeAccess, foreignKey: 'groupId', otherKey: 'nodeId' });
+Node.belongsToMany(Group, { through: GroupNodeAccess, foreignKey: 'nodeId', otherKey: 'groupId' });
 
 // Deleting a user cascades to the nodes they own and the groups they created, and those in turn
 // cascade to their access/membership/share join rows — so removing a user cleans up everything
 // they owned without any application-level enumeration.
-Node.belongsTo(FleetUser, { as: 'owner', foreignKey: 'ownerUserId', onDelete: 'CASCADE' });
-FleetUser.hasMany(Node, { as: 'ownedNodes', foreignKey: 'ownerUserId', onDelete: 'CASCADE' });
+Node.belongsTo(User, { as: 'owner', foreignKey: 'ownerUserId', onDelete: 'CASCADE' });
+User.hasMany(Node, { as: 'ownedNodes', foreignKey: 'ownerUserId', onDelete: 'CASCADE' });
 
-FleetGroup.belongsTo(FleetUser, { as: 'creator', foreignKey: 'createdByUserId', onDelete: 'CASCADE' });
-FleetUser.hasMany(FleetGroup, { as: 'createdGroups', foreignKey: 'createdByUserId', onDelete: 'CASCADE' });
+Group.belongsTo(User, { as: 'creator', foreignKey: 'createdByUserId', onDelete: 'CASCADE' });
+User.hasMany(Group, { as: 'createdGroups', foreignKey: 'createdByUserId', onDelete: 'CASCADE' });
 
 // Connectivity events are keyed by the node's public nodeId (not its PK) so they can be recorded
 // from the socket layer, and cascade away when the node is deleted.
@@ -66,15 +66,15 @@ Node.hasMany(NodeConnectivityEvent, { foreignKey: 'nodeId', sourceKey: 'nodeId',
 NodeConnectivityEvent.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
 
 export {
-	FleetUser,
-	FleetGroup,
+	User,
+	Group,
 	Node,
 	NodeConnectivityEvent,
-	FleetSession,
-	FleetPendingUser,
-	FleetRecoveryCode,
-	FleetPushSubscription,
-	FleetUserGroup,
+	Session,
+	PendingUser,
+	RecoveryCode,
+	PushSubscription,
+	UserGroup,
 	NodeAccess,
 	GroupNodeAccess
 };

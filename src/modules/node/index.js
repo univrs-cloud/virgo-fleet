@@ -10,7 +10,7 @@ import DataService from '../../services/data_service.js';
 import { authenticateSocketUser } from '../../utils/socket_auth.js';
 import { emitNodes } from './proxy.js';
 
-const FLEET_UNREGISTER_TIMEOUT_MS = 5000;
+const UNREGISTER_TIMEOUT_MS = 5000;
 // How often stale connectivity events (beyond the retention window) are swept.
 const CONNECTIVITY_PRUNE_INTERVAL_MS = 1000 * 60 * 60;
 const UPDATE_STAGES = new Set(['download', 'install']);
@@ -347,7 +347,7 @@ class NodeModule {
 			return;
 		}
 		try {
-			await nodeSocket.timeout(FLEET_UNREGISTER_TIMEOUT_MS).emitWithAck('fleet:unregister');
+			await nodeSocket.timeout(UNREGISTER_TIMEOUT_MS).emitWithAck('fleet:unregister');
 		} catch (error) {
 			console.error(`Fleet unregister request to node ${nodeId} failed:`, error?.message || error);
 		}

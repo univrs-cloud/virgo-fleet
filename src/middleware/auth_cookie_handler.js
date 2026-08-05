@@ -34,13 +34,13 @@ export default async (req, res, next) => {
 	if (sessionToken) {
 		try {
 			const session = await DataService.getSessionByToken(sessionToken);
-			if (session?.FleetUser) {
+			if (session?.User) {
 				// Carry the session's MFA state onto the refreshed cookie — otherwise this per-request
 				// re-issue defaults to 'satisfied' and strips the mfa flag that login/verify set, so the
 				// UI would route a gated session into the app instead of the setup/challenge screen.
 				setAuthCookies(res, req, {
 					token: sessionToken,
-					user: session.FleetUser,
+					user: session.User,
 					mfaState: session.mfaState
 				});
 				res.header('Access-Control-Allow-Origin', '*');
