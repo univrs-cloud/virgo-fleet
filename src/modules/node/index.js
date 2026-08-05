@@ -15,41 +15,23 @@ const UNREGISTER_TIMEOUT_MS = 5000;
 const CONNECTIVITY_PRUNE_INTERVAL_MS = 1000 * 60 * 60;
 const UPDATE_STAGES = new Set(['download', 'install']);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const nodeSocketsByNodeId = new Map();
-// Deleted on disconnect so an offline node shows no badge; refreshed on reconnect. Value is
-// { system, apps }, each an updates array | [] | false.
-const updatesByNodeId = new Map();
-const updateByNodeId = new Map();
-const storageByNodeId = new Map();
-
-const sanitizeUpdate = (update) => {
-	const state = update?.state;
-	if (state === 'succeeded' || state === 'failed') {
-		return { state };
-	}
-	if (state !== 'running') {
-		return null;
-	}
-
-	const progress = update.progress;
-	const percent = Number(progress?.percent);
-	if (!progress || !UPDATE_STAGES.has(progress.stage) || !Number.isFinite(percent)) {
-		return { state };
-	}
-	return { state, stage: progress.stage, percent: Math.min(100, Math.max(0, Math.round(percent))) };
-};
 
 class NodeModule {
 	#nsp;
 	#plugins = [];
+	#nodeSocketsByNodeId = new Map();
+	#updatesByNodeId = new Map();
+	#updateByNodeId = new Map();
+	#appUpdateJobsByNodeId = new Map();
+	#storageByNodeId = new Map();
 
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
 		registerFleetProxy(socket.getIO(), (nodeId) => {
-			return nodeSocketsByNodeId.get(nodeId);
+			return this.#nodeSocketsByNodeId.get(nodeId);
 		});
 		registerNodeSocketGetter((nodeId) => {
-			return nodeSocketsByNodeId.get(nodeId);
+			return this.#nodeSocketsByNodeId.get(nodeId);
 		});
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
@@ -81,6 +63,59 @@ class NodeModule {
 
 	get eventEmitter() {
 		return eventEmitter;
+	}
+
+	setNodeSocket(nodeId, socket) {
+		this.#nodeSocketsByNodeId.set(nodeId, socket);
+		attachNodeAssetHandler(socket);
+	}
+
+	getNodeSocket(nodeId) {
+		return this.#nodeSocketsByNodeId.get(nodeId);
+	}
+	
+	disconnectNode(nodeId) {
+		this.getNodeSocket(nodeId)?.disconnect(true);
+	}
+
+	isNodeOnline(nodeId) {
+		return this.#nodeSocketsByNodeId.has(nodeId);
+	}
+
+	getNodeUpdates(nodeId) {
+		return this.#updatesByNodeId.get(nodeId) ?? null;
+	}
+
+	getNodeUpdate(nodeId) {
+		return this.#updateByNodeId.get(nodeId) ?? null;
+	}
+
+	getNodeAppUpdateJobs(nodeId) {
+		return this.#appUpdateJobsByNodeId.get(nodeId) ?? [];
+	}
+
+	getNodeStorage(nodeId) {
+		return this.#storageByNodeId.get(nodeId) ?? null;
+	}
+
+	/** Fully removes a node from the fleet: asks an online node to unregister (wiping its own fleet
+	 * config) first, then deletes the fleet records and drops its connection. Remaining members are
+	 * refreshed so it disappears from their inventory. Used by the owner "Remove from inventory". */
+	async teardownNode(nodeId) {
+		const affected = await DataService.listNodeMemberUserIds(nodeId);
+		await this.#requestUnregister(nodeId);
+		await DataService.deleteNode(nodeId);
+		this.disconnectNode(nodeId);
+		this.eventEmitter.emit('nodes:updated', { userIds: affected });
+	}
+
+	/** Notifies nodes to unregister and drops their sockets without touching the DB — used when the
+	 * records were already removed (e.g. cascaded by deleting their owner's account). */
+	async unregisterNodes(nodeIds) {
+		for (const nodeId of nodeIds || []) {
+			await this.#requestUnregister(nodeId);
+			this.disconnectNode(nodeId);
+		}
 	}
 
 	#setupMiddleware() {
@@ -123,7 +158,7 @@ class NodeModule {
 				this.setNodeSocket(socket.data.nodeId, socket);
 				this.#handleNodePresence(socket.data.nodeId, true);
 				socket.on('node:updates', ({ system, apps } = {}) => {
-					updatesByNodeId.set(socket.data.nodeId, { system, apps });
+					this.#updatesByNodeId.set(socket.data.nodeId, { system, apps });
 					DataService.listNodeMemberUserIds(socket.data.nodeId)
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node updates:', error); });
@@ -131,18 +166,29 @@ class NodeModule {
 						.catch((error) => { console.error('Error pushing update notification:', error); });
 				});
 				socket.on('node:update', (update) => {
-					const sanitized = sanitizeUpdate(update);
+					const sanitized = this.#sanitizeUpdate(update);
 					if (sanitized) {
-						updateByNodeId.set(socket.data.nodeId, sanitized);
+						this.#updateByNodeId.set(socket.data.nodeId, sanitized);
 					} else {
-						updateByNodeId.delete(socket.data.nodeId);
+						this.#updateByNodeId.delete(socket.data.nodeId);
 					}
 					DataService.listNodeMemberUserIds(socket.data.nodeId)
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node update progress:', error); });
 				});
+				socket.on('node:app:update:job', (job) => {
+					if (!job?.id) {
+						return;
+					}
+
+					const jobs = this.#appUpdateJobsByNodeId.get(socket.data.nodeId) ?? [];
+					this.#appUpdateJobsByNodeId.set(socket.data.nodeId, this.#applyAppUpdateJob(jobs, job));
+					DataService.listNodeMemberUserIds(socket.data.nodeId)
+						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
+						.catch((error) => { console.error('Error broadcasting node app update jobs:', error); });
+				});
 				socket.on('node:storage', (storage) => {
-					storageByNodeId.set(socket.data.nodeId, storage);
+					this.#storageByNodeId.set(socket.data.nodeId, storage);
 					DataService.listNodeMemberUserIds(socket.data.nodeId)
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node storage:', error); });
@@ -162,11 +208,12 @@ class NodeModule {
 			});
 			socket.on('disconnect', () => {
 				const nodeId = socket.data?.nodeId;
-				if (nodeId && nodeSocketsByNodeId.get(nodeId) === socket) {
-					nodeSocketsByNodeId.delete(nodeId);
-					updatesByNodeId.delete(nodeId);
-					updateByNodeId.delete(nodeId);
-					storageByNodeId.delete(nodeId);
+				if (nodeId && this.#nodeSocketsByNodeId.get(nodeId) === socket) {
+					this.#nodeSocketsByNodeId.delete(nodeId);
+					this.#updatesByNodeId.delete(nodeId);
+					this.#updateByNodeId.delete(nodeId);
+					this.#appUpdateJobsByNodeId.delete(nodeId);
+					this.#storageByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.
@@ -175,6 +222,33 @@ class NodeModule {
 				}
 			});
 		});
+	}
+
+	/** The shape of a node's system update the fleet is willing to show: anything it can't read as a
+	 * stage and a percent degrades to the bare state. */
+	#sanitizeUpdate(update) {
+		const state = update?.state;
+		if (state === 'succeeded' || state === 'failed') {
+			return { state };
+		}
+
+		if (state !== 'running') {
+			return null;
+		}
+
+		const progress = update.progress;
+		const percent = Number(progress?.percent);
+		if (!progress || !UPDATE_STAGES.has(progress.stage) || !Number.isFinite(percent)) {
+			return { state };
+		}
+		return { state, stage: progress.stage, percent: Math.min(100, Math.max(0, Math.round(percent))) };
+	}
+
+	/** A node's app update jobs after applying one it just reported, keeping the list the way a browser
+	 * does: replace it by id, or drop it once it reads as finished. */
+	#applyAppUpdateJob(jobs, job) {
+		const remaining = jobs.filter((tracked) => { return tracked.id !== job.id; });
+		return ['completed', 'failed'].includes(job.progress?.state) ? remaining : [...remaining, job];
 	}
 
 	async #loadPlugins() {
@@ -228,7 +302,7 @@ class NodeModule {
 
 	/** Web Push to a node's members when its set of available updates changes. A signature persisted on
 	 * the node row dedupes re-reports — a node re-sends node:updates on every reconnect, and the in-memory
-	 * updatesByNodeId is cleared on disconnect — so members are notified once per new update set rather
+	 * this.#updatesByNodeId is cleared on disconnect — so members are notified once per new update set rather
 	 * than on every reconnect or process restart. An empty set resets the stored signature (so the next
 	 * time updates appear it counts as new) without notifying. */
 	async #notifyUpdatesAvailable(nodeId, { system, apps }) {
@@ -309,37 +383,6 @@ class NodeModule {
 		await PushService.sendNodeStorageNotification(userIds, { nodeId, name, changes });
 	}
 
-	getNodeSocket(nodeId) {
-		return nodeSocketsByNodeId.get(nodeId);
-	}
-
-	/** Forcibly drops a node's live connection (e.g. after it's deleted); the socket's own `disconnect` handler does the rest of the cleanup (proxy teardown, status broadcast). */
-	disconnectNode(nodeId) {
-		this.getNodeSocket(nodeId)?.disconnect(true);
-	}
-
-	setNodeSocket(nodeId, socket) {
-		nodeSocketsByNodeId.set(nodeId, socket);
-		attachNodeAssetHandler(socket);
-	}
-
-	isNodeOnline(nodeId) {
-		return nodeSocketsByNodeId.has(nodeId);
-	}
-
-	/** { system, apps } the node last reported, or null when offline/unknown. */
-	getNodeUpdates(nodeId) {
-		return updatesByNodeId.get(nodeId) ?? null;
-	}
-
-	getNodeUpdate(nodeId) {
-		return updateByNodeId.get(nodeId) ?? null;
-	}
-	
-	getNodeStorage(nodeId) {
-		return storageByNodeId.get(nodeId) ?? null;
-	}
-
 	/** Best-effort request to an online node to wipe its own fleet config. */
 	async #requestUnregister(nodeId) {
 		const nodeSocket = this.getNodeSocket(nodeId);
@@ -350,26 +393,6 @@ class NodeModule {
 			await nodeSocket.timeout(UNREGISTER_TIMEOUT_MS).emitWithAck('fleet:unregister');
 		} catch (error) {
 			console.error(`Fleet unregister request to node ${nodeId} failed:`, error?.message || error);
-		}
-	}
-
-	/** Fully removes a node from the fleet: asks an online node to unregister (wiping its own fleet
-	 * config) first, then deletes the fleet records and drops its connection. Remaining members are
-	 * refreshed so it disappears from their inventory. Used by the owner "Remove from inventory". */
-	async teardownNode(nodeId) {
-		const affected = await DataService.listNodeMemberUserIds(nodeId);
-		await this.#requestUnregister(nodeId);
-		await DataService.deleteNode(nodeId);
-		this.disconnectNode(nodeId);
-		this.eventEmitter.emit('nodes:updated', { userIds: affected });
-	}
-
-	/** Notifies nodes to unregister and drops their sockets without touching the DB — used when the
-	 * records were already removed (e.g. cascaded by deleting their owner's account). */
-	async unregisterNodes(nodeIds) {
-		for (const nodeId of nodeIds || []) {
-			await this.#requestUnregister(nodeId);
-			this.disconnectNode(nodeId);
 		}
 	}
 }

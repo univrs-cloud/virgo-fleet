@@ -58,10 +58,12 @@ const relayEventToNode = (nodeSocket, { namespace, event, config }) => {
 	});
 };
 
-/** Shared driver for the fleet events that relay a /host control event to an online node the
- * caller can access (system update start / finish). Validates the request, then hands off to
- * relayEventToNode; the ack mirrors the other node:* handlers. */
-const relayHostEvent = async (socket, module, event, config, ack) => {
+/** Shared driver for the fleet events that relay a control event to an online node the caller can
+ * access (system update start / finish, app update). Validates access and passes the caller's config
+ * on as the event's argument, for the node to make what it will of; the ack mirrors the other node:*
+ * handlers. A succeeded ack means the event reached the node, not that the work it starts has
+ * finished — progress comes back through the node's own reporting. */
+const relayNodeEvent = async (socket, module, { namespace, event }, config, ack) => {
 	try {
 		if (!socket.isAuthenticated) {
 			ack({ status: 'failed', message: 'Authentication required.' });
@@ -82,7 +84,7 @@ const relayHostEvent = async (socket, module, event, config, ack) => {
 			ack({ status: 'failed', message: 'Node is offline.' });
 			return;
 		}
-		await relayEventToNode(nodeSocket, { namespace: '/host', event });
+		await relayEventToNode(nodeSocket, { namespace, event, config });
 		ack({ status: 'succeeded' });
 	} catch (error) {
 		ack({ status: 'failed', message: error.message });
@@ -113,6 +115,7 @@ const emitNodes = async (socket, module) => {
 				online,
 				updates: module.getNodeUpdates(node.nodeId),
 				update: module.getNodeUpdate(node.nodeId),
+				appUpdateJobs: module.getNodeAppUpdateJobs(node.nodeId),
 				storage: module.getNodeStorage(node.nodeId),
 				connectivity: buildConnectivitySegments({
 					events: eventsByNodeId.get(node.nodeId) || [],
@@ -298,10 +301,10 @@ const onConnection = (socket, module) => {
 		}
 	});
 
-	// Relay the node role's system-update controls to the target node: start (host:update) and
-	// finish/Continue (host:update:complete). Both share the same access-checked relay.
-	socket.on('node:update', (config, ack = () => {}) => relayHostEvent(socket, module, 'host:update', config, ack));
-	socket.on('node:update:complete', (config, ack = () => {}) => relayHostEvent(socket, module, 'host:update:complete', config, ack));
+	socket.on('node:update', (config, ack = () => {}) => relayNodeEvent(socket, module, { namespace: '/host', event: 'host:update' }, config, ack));
+	socket.on('node:update:complete', (config, ack = () => {}) => relayNodeEvent(socket, module, { namespace: '/host', event: 'host:update:complete' }, config, ack));
+
+	socket.on('node:app:update', (config, ack = () => {}) => relayNodeEvent(socket, module, { namespace: '/docker', event: 'app:update' }, config, ack));
 
 	socket.on('group:node:add', async (config, ack = () => {}) => {
 		try {
