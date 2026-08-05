@@ -2,7 +2,6 @@ import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { sequelize } from '../database/index.js';
-import { runMigrations } from '../migrations/index.js';
 import {
 	Node,
 	NodeConnectivityEvent,
@@ -61,9 +60,6 @@ function toPublicUser(user) {
 
 class DataService {
 	static async initialize() {
-		// Migrations first: sync() only creates missing tables, so anything that renames or alters
-		// an existing one has to land before sync sees it.
-		await runMigrations();
 		await sequelize.sync();
 		return true;
 	}

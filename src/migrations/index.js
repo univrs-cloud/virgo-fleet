@@ -30,8 +30,14 @@ async function loadMigrations() {
 // sequelize.sync(): sync only ever creates missing tables, so a schema change that renames one
 // has to land first or sync will helpfully create an empty table alongside the populated original.
 export async function runMigrations() {
-	await ensureLedger();
 	const migrations = await loadMigrations();
+	// Nothing to do until a migration is added, so don't touch the database at all — the ledger is
+	// created on demand by the first one.
+	if (!migrations.length) {
+		return;
+	}
+	
+	await ensureLedger();
 
 	// One transaction for the whole run: Postgres DDL is transactional, so a failure anywhere
 	// leaves neither the schema changes nor the ledger rows behind and the next boot retries

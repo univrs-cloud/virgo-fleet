@@ -72,4 +72,7 @@ ENV VAPID_PUBLIC_KEY="" \
     VAPID_PRIVATE_KEY="" \
     VAPID_SUBJECT=""
 
+# Migrations run first, in the entrypoint; a failure there stops the container rather than starting
+# the app against a schema it does not match. CMD stays overridable and still gets migrated first.
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "index.js"]
