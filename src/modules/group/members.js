@@ -17,6 +17,10 @@ const onConnection = (socket, module) => {
 				ack({ status: 'failed', message: 'email is required.' });
 				return;
 			}
+			if (!await DataService.getUserByEmail(email)) {
+				ack({ status: 'failed', message: 'No account exists for that email address.' });
+				return;
+			}
 			await DataService.addUserToGroup({
 				groupId: config.groupId,
 				email,
