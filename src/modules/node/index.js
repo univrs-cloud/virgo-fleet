@@ -300,30 +300,69 @@ class NodeModule {
 		}
 	}
 
-	/** Web Push to a node's members when its set of available updates changes. A signature persisted on
-	 * the node row dedupes re-reports — a node re-sends node:updates on every reconnect, and the in-memory
-	 * this.#updatesByNodeId is cleared on disconnect — so members are notified once per new update set rather
-	 * than on every reconnect or process restart. An empty set resets the stored signature (so the next
-	 * time updates appear it counts as new) without notifying. */
+	/** What a node currently has waiting, as a list of things rather than a count: a package at the
+	 * version it can move to, an app by name. Working through them changes the list without any of it
+	 * being news, which is the difference between this and a count.
+	 *
+	 * A node reports each side as a list once it knows, and as `false` until it does — after a restart,
+	 * before the first check. An unknown side keeps whatever was last known of it, so a node coming back
+	 * does not appear to have everything all over again. */
+	#updateKeys({ system, apps }, previous) {
+		const known = (prefix) => { return previous.filter((key) => { return key.startsWith(prefix); }); };
+		return [
+			...(Array.isArray(system) ? system.map((update) => { return `system:${update?.package}@${update?.version?.updatableTo}`; }) : known('system:')),
+			...(Array.isArray(apps) ? apps.map((app) => { return `app:${app?.name}`; }) : known('app:'))
+		].sort();
+	}
+
+	/** The members of a node with nothing to look at right now. Someone with the fleet open is watching
+	 * the same updates arrive on screen, and a notification tells them what they can already see. */
+	#membersAway(userIds) {
+		const watching = new Set();
+		for (const socket of this.#nsp.sockets.values()) {
+			if (socket.data?.role === 'user' && socket.isAuthenticated) {
+				watching.add(socket.userId);
+			}
+		}
+		return userIds.filter((userId) => { return !watching.has(userId); });
+	}
+
+	/** Web Push to a node's members when something appears that was not waiting before. The list is
+	 * persisted on the node row, so a node re-reporting on every reconnect, a restart of this process, or
+	 * updates being worked through one at a time all pass in silence — only an addition is news. The
+	 * stored list is refreshed either way, so an update installed now and offered again later counts as
+	 * new when it returns. */
 	async #notifyUpdatesAvailable(nodeId, { system, apps }) {
-		const systemCount = Array.isArray(system) ? system.length : 0;
-		const appsCount = Array.isArray(apps) ? apps.length : 0;
-		const signature = (systemCount + appsCount) === 0 ? '' : JSON.stringify({ system, apps });
-		const previous = (await DataService.getNodeUpdateSignature(nodeId)) || '';
-		if (signature === previous) {
+		let previous = [];
+		try {
+			const stored = JSON.parse((await DataService.getNodeUpdateSignature(nodeId)) || '[]');
+			previous = (Array.isArray(stored) ? stored : []);
+		} catch (error) {
+			// Written in an older shape, before this was a list: nothing to compare against.
+		}
+
+		const current = this.#updateKeys({ system, apps }, previous);
+		const isNews = current.some((key) => { return !previous.includes(key); });
+		await DataService.setNodeUpdateSignature(nodeId, JSON.stringify(current));
+		if (!isNews) {
 			return;
 		}
 
-		await DataService.setNodeUpdateSignature(nodeId, signature);
-		if (!signature) {
-			return;
-		}
-		
 		const [name, userIds] = await Promise.all([
 			DataService.getNodeName(nodeId),
 			DataService.listNodeMemberUserIds(nodeId)
 		]);
-		await PushService.sendNodeUpdateNotification(userIds, { nodeId, name, systemCount, appsCount });
+		const recipients = this.#membersAway(userIds);
+		if (recipients.length === 0) {
+			return;
+		}
+
+		await PushService.sendNodeUpdateNotification(recipients, {
+			nodeId,
+			name,
+			systemCount: (Array.isArray(system) ? system.length : 0),
+			appsCount: (Array.isArray(apps) ? apps.length : 0)
+		});
 	}
 
 	/** The summarised state of a pool, mirroring the fleet grid: a resilvering pool reads as rebuilding
