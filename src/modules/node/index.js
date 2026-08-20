@@ -24,6 +24,7 @@ class NodeModule {
 	#updateByNodeId = new Map();
 	#appUpdateJobsByNodeId = new Map();
 	#storageByNodeId = new Map();
+	#upsByNodeId = new Map();
 
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
@@ -96,6 +97,10 @@ class NodeModule {
 
 	getNodeStorage(nodeId) {
 		return this.#storageByNodeId.get(nodeId) ?? null;
+	}
+
+	getNodeUps(nodeId) {
+		return this.#upsByNodeId.get(nodeId) ?? null;
 	}
 
 	/** Fully removes a node from the fleet: asks an online node to unregister (wiping its own fleet
@@ -195,6 +200,17 @@ class NodeModule {
 					this.#notifyStorageHealth(socket.data.nodeId, storage)
 						.catch((error) => { console.error('Error pushing storage notification:', error); });
 				});
+				socket.on('node:ups', (ups) => {
+					const changed = (this.#upsSignature(this.#upsByNodeId.get(socket.data.nodeId)) !== this.#upsSignature(ups));
+					this.#upsByNodeId.set(socket.data.nodeId, ups);
+					if (!changed) {
+						return;
+					}
+
+					DataService.listNodeMemberUserIds(socket.data.nodeId)
+						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
+						.catch((error) => { console.error('Error broadcasting node ups:', error); });
+				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
 				emitNodes(socket, this).catch((error) => {
@@ -214,6 +230,7 @@ class NodeModule {
 					this.#updateByNodeId.delete(nodeId);
 					this.#appUpdateJobsByNodeId.delete(nodeId);
 					this.#storageByNodeId.delete(nodeId);
+					this.#upsByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.
@@ -222,6 +239,16 @@ class NodeModule {
 				}
 			});
 		});
+	}
+
+	/** What the node card draws from a UPS reading: the power source, whether it is charging, and the
+	 * whole-percent capacity. */
+	#upsSignature(ups) {
+		if (!ups || typeof ups !== 'object') {
+			return String(ups);
+		}
+
+		return `${ups.powerSource}:${ups.isCharging}:${Math.round(ups.capacity ?? 0)}`;
 	}
 
 	/** The shape of a node's system update the fleet is willing to show: anything it can't read as a

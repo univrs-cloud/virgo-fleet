@@ -117,6 +117,7 @@ const emitNodes = async (socket, module) => {
 				update: module.getNodeUpdate(node.nodeId),
 				appUpdateJobs: module.getNodeAppUpdateJobs(node.nodeId),
 				storage: module.getNodeStorage(node.nodeId),
+				ups: module.getNodeUps(node.nodeId),
 				connectivity: buildConnectivitySegments({
 					events: eventsByNodeId.get(node.nodeId) || [],
 					windowStartMs,
