@@ -38,9 +38,15 @@ const decodeBuffer = (value) => {
 	return new Uint8Array(Buffer.from(value, 'base64url'));
 };
 
-/** Options for navigator.credentials.create(). `existing` excludes authenticators already
- * enrolled on this account so the same device can't silently register itself twice. */
-async function buildRegistrationOptions({ user, existing = [] }) {
+/** Options for navigator.credentials.create().
+ *
+ * Deliberately no excludeCredentials. It would stop a device enrolling twice, but a platform
+ * authenticator already keys its resident credential by (rpID, user handle) and simply replaces it,
+ * so re-enrolling is naturally idempotent and the list only costs us. When it does match, the
+ * browser is supposed to raise InvalidStateError; Firefox reports an opaque "unknown transient"
+ * error instead, which is indistinguishable from a real failure. Dropping it makes re-enrollment
+ * the repair path for a device whose local marker was lost. */
+async function buildRegistrationOptions({ user }) {
 	return generateRegistrationOptions({
 		rpName: RP_NAME,
 		rpID: RP_ID,
@@ -50,9 +56,6 @@ async function buildRegistrationOptions({ user, existing = [] }) {
 		userName: user.email,
 		userDisplayName: user.name || user.email,
 		attestationType: 'none',
-		excludeCredentials: existing.map((credential) => {
-			return { id: credential.credentialId, transports: credential.transports || undefined };
-		}),
 		authenticatorSelection: AUTHENTICATOR_SELECTION
 	});
 }

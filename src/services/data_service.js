@@ -324,10 +324,6 @@ class DataService {
 		return { challenge: row.challenge, userId: row.userId };
 	}
 
-	static async getCredentialsForUser(userId) {
-		return Credential.findAll({ where: { userId: userId }, order: [['createdAt', 'ASC']] });
-	}
-
 	/** Begin enrollment. Callers must already hold a satisfied session — that gate is what keeps a
 	 * passkey from ever becoming a first factor in its own right. */
 	static async beginPasskeyRegistration(userId) {
@@ -335,8 +331,7 @@ class DataService {
 		if (!user) {
 			throw new Error('User not found.');
 		}
-		const existing = await this.getCredentialsForUser(userId);
-		const options = await buildRegistrationOptions({ user, existing });
+		const options = await buildRegistrationOptions({ user });
 		const challengeId = await this.createWebauthnChallenge({
 			challenge: options.challenge,
 			type: 'registration',
