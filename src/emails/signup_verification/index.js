@@ -1,5 +1,6 @@
 import MailService from '../../services/mailer.js';
-import { loadTemplate, renderTemplate, escapeHtml, getAppUrl } from '../helpers.js';
+import { loadTemplate, renderTemplate, escapeHtml } from '../helpers.js';
+import { getAppUrl } from '../../utils/app_url.js';
 
 function buildVerificationUrl(token) {
 	// Points at the SPA confirmation route (which calls the verify API), not the API directly.

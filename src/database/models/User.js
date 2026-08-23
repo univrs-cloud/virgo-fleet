@@ -40,6 +40,14 @@ const User = sequelize.define('User', {
 		type: DataTypes.DATE,
 		allowNull: true
 	},
+	// True while at least one WebAuthn credential is enrolled. Denormalised from the credentials
+	// table so buildAccountFromUser can put it on the account cookie without a second query — the
+	// UI needs it to render the profile switch and to know a passkey sign-in is worth offering.
+	passkeyEnabled: {
+		type: DataTypes.BOOLEAN,
+		allowNull: false,
+		defaultValue: false
+	},
 	// Account-level intent to receive Web Push update notifications. Set true when any device
 	// subscribes, false when the user turns notifications off (which also drops every device's
 	// subscription). Lets a new device know to obtain its own permission without a manual opt-in.

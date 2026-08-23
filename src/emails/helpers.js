@@ -31,16 +31,3 @@ export function renderTemplate(template, values) {
 		return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : '';
 	});
 }
-
-// Externally reachable base URL, derived from DOMAIN the way Traefik routes the fleet:
-// https://fleet.<DOMAIN>. Email links (verification, password reset, …) are built on top of it.
-export function getAppUrl() {
-	const domain = String(process.env.DOMAIN || '')
-		.trim()
-		.replace(/^https?:\/\//, '')
-		.replace(/\/+$/, '');
-	if (domain) {
-		return `https://fleet.${domain}`;
-	}
-	return '';
-}

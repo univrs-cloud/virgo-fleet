@@ -11,9 +11,11 @@ import {
 	User,
 	Group,
 	RecoveryCode,
-	PushSubscription,
+	Credential,
+	WebauthnChallenge,
 	UserGroup,
-	GroupNodeAccess
+	GroupNodeAccess,
+	PushSubscription
 } from '../database/models/associations.js';
 import { normalizeEmail } from '../utils/email.js';
 import {
@@ -26,6 +28,12 @@ import {
 	hashRecoveryCode,
 	verifyRecoveryCode
 } from '../utils/totp.js';
+import {
+	buildAuthenticationOptions,
+	buildRegistrationOptions,
+	verifyAuthentication,
+	verifyRegistration
+} from '../utils/webauthn.js';
 
 const PASSWORD_COST = 12;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
@@ -37,6 +45,9 @@ const PENDING_TTL_MS = 1000 * 60 * 30;
 // it regardless (see pruneConnectivityEvents), so a node stable for days still keeps the one
 // transition that tells us its current state and since when.
 const CONNECTIVITY_RETENTION_MS = 1000 * 60 * 60 * 25;
+// A WebAuthn ceremony is two round-trips with a user gesture in between; the authenticator's own
+// timeout is 60s, so two minutes is generous and still keeps a stolen challenge worthless.
+const WEBAUTHN_CHALLENGE_TTL_MS = 1000 * 60 * 2;
 
 function toPublicUser(user) {
 	if (!user) {
@@ -277,6 +288,137 @@ class DataService {
 
 	static async countRemainingRecoveryCodes(userId) {
 		return RecoveryCode.count({ where: { userId: userId, usedAt: null } });
+	}
+
+	/** Stash a challenge for the second half of a ceremony and return the handle the client echoes
+	 * back. Expired rows are swept here so the table never needs its own janitor. */
+	static async createWebauthnChallenge({ challenge, type, userId = null }) {
+		await WebauthnChallenge.destroy({ where: { expiresAt: { [Op.lt]: new Date() } } });
+		const id = randomBytes(32).toString('hex');
+		await WebauthnChallenge.create({
+			id,
+			challenge,
+			type,
+			userId,
+			expiresAt: new Date(Date.now() + WEBAUTHN_CHALLENGE_TTL_MS)
+		});
+		return id;
+	}
+
+	/** Redeem a challenge. Deleted whether or not it matched, so a handle is good for exactly one
+	 * attempt and a wrong `type` can't be retried against the right endpoint. */
+	static async consumeWebauthnChallenge(id, type) {
+		// The handle comes straight off the request body, so refuse anything that isn't the string
+		// we issued rather than letting Sequelize coerce it.
+		if (typeof id !== 'string' || !id) {
+			return null;
+		}
+		const row = await WebauthnChallenge.findByPk(id);
+		if (!row) {
+			return null;
+		}
+		await row.destroy();
+		if (row.type !== type || row.expiresAt.getTime() < Date.now()) {
+			return null;
+		}
+		return { challenge: row.challenge, userId: row.userId };
+	}
+
+	static async getCredentialsForUser(userId) {
+		return Credential.findAll({ where: { userId: userId }, order: [['createdAt', 'ASC']] });
+	}
+
+	/** Begin enrollment. Callers must already hold a satisfied session — that gate is what keeps a
+	 * passkey from ever becoming a first factor in its own right. */
+	static async beginPasskeyRegistration(userId) {
+		const user = await User.findByPk(userId);
+		if (!user) {
+			throw new Error('User not found.');
+		}
+		const existing = await this.getCredentialsForUser(userId);
+		const options = await buildRegistrationOptions({ user, existing });
+		const challengeId = await this.createWebauthnChallenge({
+			challenge: options.challenge,
+			type: 'registration',
+			userId: userId
+		});
+		return { options, challengeId };
+	}
+
+	/** Finish enrollment: verify the attestation, store the credential, and flip the account flag
+	 * that tells the UI (via the account cookie) that biometric sign-in is available. */
+	static async completePasskeyRegistration({ userId, challengeId, response }) {
+		const pending = await this.consumeWebauthnChallenge(challengeId, 'registration');
+		if (!pending || pending.userId !== userId) {
+			throw new Error('That enrollment expired. Try again.');
+		}
+		const verified = await verifyRegistration({ response, expectedChallenge: pending.challenge });
+		if (!verified) {
+			throw new Error('Could not verify this device.');
+		}
+		await sequelize.transaction(async (transaction) => {
+			await Credential.create({ ...verified, userId: userId }, { transaction });
+			await User.update({ passkeyEnabled: true }, { where: { id: userId }, transaction });
+		});
+		return true;
+	}
+
+	static async beginPasskeyAuthentication() {
+		const options = await buildAuthenticationOptions();
+		const challengeId = await this.createWebauthnChallenge({
+			challenge: options.challenge,
+			type: 'authentication'
+		});
+		return { options, challengeId };
+	}
+
+	/** Finish sign-in. A verified assertion mints a session that is already 'satisfied': the
+	 * authenticator proved possession of the device and verified the user on it, and the credential
+	 * only exists because password + TOTP were cleared when it was enrolled. */
+	static async completePasskeyAuthentication({ challengeId, response }) {
+		const pending = await this.consumeWebauthnChallenge(challengeId, 'authentication');
+		if (!pending) {
+			throw new Error('That sign-in attempt expired. Try again.');
+		}
+		// Guard the lookup key: an absent or non-string id would reach Sequelize as an invalid WHERE
+		// value and surface a driver error instead of a clean rejection.
+		const credentialId = typeof response?.id === 'string' ? response.id : null;
+		const credential = credentialId
+			? await Credential.findOne({ where: { credentialId }, include: [User] })
+			: null;
+		if (!credential?.User) {
+			throw new Error('This device is not enrolled.');
+		}
+		if (credential.User.isDisabled) {
+			throw new Error('Invalid credentials.');
+		}
+		let verified = null;
+		try {
+			verified = await verifyAuthentication({ response, expectedChallenge: pending.challenge, credential });
+		} catch (error) {
+			// A counter that went backwards means a cloned authenticator; simplewebauthn throws
+			// rather than returning false, and either way it's a failed sign-in.
+			verified = null;
+		}
+		if (!verified) {
+			throw new Error('Could not verify this device.');
+		}
+		credential.counter = verified.counter;
+		credential.lastUsedAt = new Date();
+		await credential.save();
+		const user = await this.getUserById(credential.userId);
+		const session = await this.createSession(user.id, 'satisfied');
+		return { ...session, mfaState: 'satisfied', user };
+	}
+
+	/** Turn biometric sign-in off for the whole account. Every credential goes, on every device —
+	 * this is also the lost-device switch, so leaving one behind would defeat the point. */
+	static async disablePasskeys(userId) {
+		await sequelize.transaction(async (transaction) => {
+			await Credential.destroy({ where: { userId: userId }, transaction });
+			await User.update({ passkeyEnabled: false }, { where: { id: userId }, transaction });
+		});
+		return true;
 	}
 
 	// Registers an account into the pending table and returns the verification token so the

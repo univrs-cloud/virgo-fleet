@@ -1,18 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { generateSecret as otpGenerateSecret, generateURI, verifySync } from 'otplib';
+import { getAppHost } from './app_url.js';
 
 // otplib v13 verifies with a per-call tolerance in seconds; 30s ≈ one time step of drift each way.
 const CLOCK_TOLERANCE_SECONDS = 30;
-// Issuer shown in the authenticator app — the fleet host (fleet.<DOMAIN>, e.g. fleet.univrs.cloud),
-// matching how Traefik routes the fleet and how getAppUrl builds email links.
-const ISSUER = (() => {
-	const domain = String(process.env.DOMAIN || '')
-		.trim()
-		.replace(/^https?:\/\//, '')
-		.replace(/\/+$/, '');
-	return domain ? `fleet.${domain}` : 'Univrs Fleet';
-})();
+// Issuer shown in the authenticator app. Falls back to a readable name when DOMAIN is unset —
+// unlike the other callers, an empty string here would be user-visible.
+const ISSUER = getAppHost() || 'Univrs Fleet';
 const RECOVERY_CODE_COUNT = 10;
 
 // TOTP secrets must be stored in a reversible form (unlike passwords) so we can verify codes. When

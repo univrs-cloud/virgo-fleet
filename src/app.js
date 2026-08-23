@@ -4,7 +4,7 @@ import authCookieHandler from './middleware/auth_cookie_handler.js';
 import controllers from './controllers/index.js';
 import error404Handler from './middleware/error_404_handler.js';
 import errorHandler from './middleware/error_handler.js';
-import { authRateLimiter } from './middleware/rate_limit.js';
+import { authRateLimiter, webauthnOptionsRateLimiter } from './middleware/rate_limit.js';
 
 function createApp() {
 	const app = express();
@@ -15,7 +15,8 @@ function createApp() {
 	app.use(helmet({ contentSecurityPolicy: false }));
 	app.use(express.json());
 	// Throttle the credential endpoints to blunt brute-force / credential-stuffing.
-	app.use(['/auth/login', '/auth/signup', '/auth/verify', '/auth/mfa/verify', '/auth/mfa/setup/verify'], authRateLimiter);
+	app.use(['/auth/login', '/auth/signup', '/auth/verify', '/auth/mfa/verify', '/auth/mfa/setup/verify', '/auth/webauthn/verify'], authRateLimiter);
+	app.use('/auth/webauthn/options', webauthnOptionsRateLimiter);
 	app.use(authCookieHandler);
 	app.use(controllers);
 	app.use(error404Handler);

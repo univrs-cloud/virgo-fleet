@@ -4,6 +4,7 @@ import * as staticController from './static.js';
 import * as authController from './auth.js';
 import * as nodeContentController from './node_content.js';
 import * as pushController from './push.js';
+import * as webauthnController from './webauthn.js';
 
 const router = express.Router();
 
@@ -23,6 +24,11 @@ router.post('/auth/verify', authController.verify);
 router.post('/auth/mfa/setup', authController.mfaSetup);
 router.post('/auth/mfa/setup/verify', authController.mfaSetupVerify);
 router.post('/auth/mfa/verify', authController.mfaVerify);
+router.post('/auth/webauthn/register/options', webauthnController.registerOptions);
+router.post('/auth/webauthn/register/verify', webauthnController.registerVerify);
+router.post('/auth/webauthn/options', webauthnController.authenticateOptions);
+router.post('/auth/webauthn/verify', webauthnController.authenticateVerify);
+router.post('/auth/webauthn/disable', webauthnController.disable);
 router.get('/push/vapid-public-key', pushController.getVapidKey);
 router.post('/push/enable', pushController.enable);
 router.post('/push/disable', pushController.disable);

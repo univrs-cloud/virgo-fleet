@@ -17,6 +17,7 @@
 		"arm64"
 	],
 	"dependencies": {
+		"@simplewebauthn/server": "^13.3.2",
 		"bcryptjs": "^3.0.3",
 		"dotenv": "^17.4.2",
 		"execa": "^10.0.1",
@@ -26,7 +27,7 @@
 		"helmet": "^8.3.0",
 		"html-to-text": "^10.0.1",
 		"nodemailer": "^9.0.5",
-		"otplib": "^13.4.1",
+		"otplib": "^13.5.0",
 		"pg": "^8.23.0",
 		"pg-hstore": "^2.3.4",
 		"sequelize": "^6.37.8",

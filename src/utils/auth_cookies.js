@@ -48,6 +48,7 @@ function buildAccountFromUser(user, mfaState = 'satisfied') {
 		user: user.email,
 		email: user.email,
 		groups: ['admins'],
+		passkeyEnabled: Boolean(user.passkeyEnabled),
 		pushEnabled: Boolean(user.pushEnabled)
 	};
 	// Readable by the UI so the bootstrap can route a gated session to the forced setup/challenge

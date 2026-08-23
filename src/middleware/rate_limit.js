@@ -12,3 +12,16 @@ export const authRateLimiter = rateLimit({
 	validate: { trustProxy: false },
 	message: { status: 'failed', message: 'Too many attempts, please try again later.' }
 });
+
+// Starting a passkey ceremony only hands out a random challenge — it proves nothing and reveals
+// nothing about whether an account exists. The sign-in screen fires it automatically on every
+// launch, so the strict credential limiter would lock out a whole office behind one NAT address;
+// this cap is loose enough for that and still bounds challenge-row churn.
+export const webauthnOptionsRateLimiter = rateLimit({
+	windowMs: 15 * 60 * 1000,
+	max: 120,
+	standardHeaders: true,
+	legacyHeaders: false,
+	validate: { trustProxy: false },
+	message: { status: 'failed', message: 'Too many attempts, please try again later.' }
+});
