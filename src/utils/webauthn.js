@@ -19,7 +19,13 @@ const RP_NAME = 'univrs Fleet';
 // authenticator itself offers the account. userVerification 'required' is what makes a passkey
 // stand in for password + TOTP — without it the authenticator would prove possession only, and
 // skipping the other factors would be a genuine downgrade.
+//
+// 'platform' restricts enrollment to the device's built-in authenticator: fingerprint, face, or the
+// equivalent. Without it the browser would also offer a USB security key or a phone over QR, which
+// are fine credentials but are not what this feature promises. A device with no sensor therefore
+// cannot enroll at all, and stays on password + TOTP.
 const AUTHENTICATOR_SELECTION = {
+	authenticatorAttachment: 'platform',
 	residentKey: 'required',
 	userVerification: 'required'
 };
