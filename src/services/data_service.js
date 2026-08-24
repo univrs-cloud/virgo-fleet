@@ -17,6 +17,7 @@ import {
 	GroupNodeAccess,
 	PushSubscription
 } from '../database/models/associations.js';
+import eventEmitter from '../utils/event_emitter.js';
 import { normalizeEmail } from '../utils/email.js';
 import {
 	encryptSecret,
@@ -37,6 +38,33 @@ import {
 
 const PASSWORD_COST = 12;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
+// Floor on how often a session's lastSeenAt is rewritten — "active 2 minutes ago" needs no finer
+// resolution, and every request passes through the touch.
+const SESSION_ACTIVITY_THROTTLE_MS = 1000 * 60;
+const SESSION_TOUCH_CACHE_LIMIT = 5000;
+// Last write per token. Swept only once it outgrows the sessions a fleet realistically has open;
+// losing an entry costs one extra write, nothing more.
+const sessionTouchedAt = new Map();
+
+// Every session change refreshes that user's own sockets and nobody else's; the sessions plugin
+// listens. Emitted from here so no sign-in, sign-out or revoke path can forget to.
+function emitSessionsUpdated(userId) {
+	if (userId) {
+		eventEmitter.emit('sessions:updated', { userId });
+	}
+}
+
+function pruneSessionTouches() {
+	if (sessionTouchedAt.size <= SESSION_TOUCH_CACHE_LIMIT) {
+		return;
+	}
+	const cutoff = Date.now() - SESSION_ACTIVITY_THROTTLE_MS;
+	for (const [token, touchedAt] of sessionTouchedAt) {
+		if (touchedAt < cutoff) {
+			sessionTouchedAt.delete(token);
+		}
+	}
+}
 // A verification link is only good for 30 minutes; after that the pending row is dead weight
 // and re-registering the same email issues a fresh one.
 const PENDING_TTL_MS = 1000 * 60 * 30;
@@ -168,10 +196,11 @@ class DataService {
 		await user.save();
 		// Invalidate every existing session so a changed password logs out all devices.
 		await Session.destroy({ where: { userId: user.id } });
+		emitSessionsUpdated(user.id);
 		return true;
 	}
 
-	static async createSession(userId, mfaState = 'satisfied') {
+	static async createSession(userId, mfaState = 'satisfied', context = {}) {
 		const token = randomBytes(48).toString('hex');
 		const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 		// Opportunistically clear this user's expired sessions whenever they log in.
@@ -180,13 +209,88 @@ class DataService {
 			token,
 			expiresAt,
 			userId: userId,
-			mfaState
+			mfaState,
+			ipAddress: context.ipAddress ?? null,
+			userAgent: context.userAgent ?? null,
+			lastSeenAt: new Date()
 		});
+		emitSessionsUpdated(userId);
 		return { token, expiresAt };
 	}
 
+	/** Called from the cookie middleware and socket auth, so it runs on every request — the
+	 * in-process throttle is what keeps that from becoming a query per request. */
+	static async touchSession(token) {
+		if (!token) {
+			return;
+		}
+		const now = Date.now();
+		if (now - (sessionTouchedAt.get(token) ?? 0) < SESSION_ACTIVITY_THROTTLE_MS) {
+			return;
+		}
+		sessionTouchedAt.set(token, now);
+		pruneSessionTouches();
+		await Session.update({ lastSeenAt: new Date(now) }, { where: { token } });
+	}
+
+	/** The user's own live sessions, most recently active first. Rows are addressed by id — the
+	 * token never leaves the server. */
+	static async listSessions(userId) {
+		const sessions = await Session.findAll({
+			where: {
+				userId,
+				expiresAt: { [Op.gt]: new Date() }
+			},
+			order: [['lastSeenAt', 'DESC NULLS LAST'], ['createdAt', 'DESC']]
+		});
+		return sessions.map((session) => {
+			return {
+				id: session.id,
+				ipAddress: session.ipAddress,
+				userAgent: session.userAgent,
+				createdAt: session.createdAt,
+				lastSeenAt: session.lastSeenAt,
+				expiresAt: session.expiresAt,
+				// Listed even though it can't reach anything yet: a session stuck at the code prompt is
+				// still a live foothold worth ending.
+				pending: session.mfaState !== 'satisfied'
+			};
+		});
+	}
+
+	/** Scoped by userId, so an id belonging to another account matches nothing. */
+	static async revokeSession(userId, sessionId) {
+		const id = Number(sessionId);
+		if (!Number.isInteger(id)) {
+			throw new Error('Session not found.');
+		}
+		const session = await Session.findOne({ where: { id, userId } });
+		if (!session) {
+			throw new Error('Session not found.');
+		}
+		await session.destroy();
+		emitSessionsUpdated(userId);
+		return session.id;
+	}
+
+	static async revokeOtherSessions(userId, currentToken) {
+		const sessions = await Session.findAll({
+			where: {
+				userId,
+				token: { [Op.ne]: currentToken ?? '' }
+			}
+		});
+		const sessionIds = sessions.map((session) => { return session.id; });
+		if (sessionIds.length) {
+			await Session.destroy({ where: { id: sessionIds } });
+			emitSessionsUpdated(userId);
+		}
+		return sessionIds;
+	}
+
 	static async setSessionMfaState(token, mfaState) {
-		await Session.update({ mfaState }, { where: { token } });
+		const [, sessions] = await Session.update({ mfaState }, { where: { token }, returning: true });
+		emitSessionsUpdated(sessions?.[0]?.userId);
 	}
 
 	static async getSessionByToken(token) {
@@ -203,10 +307,15 @@ class DataService {
 	}
 
 	static async deleteSession(token) {
-		await Session.destroy({ where: { token } });
+		const session = await Session.findOne({ where: { token } });
+		if (!session) {
+			return;
+		}
+		await session.destroy();
+		emitSessionsUpdated(session.userId);
 	}
 
-	static async login({ email, password }) {
+	static async login({ email, password, context }) {
 		const user = await this.getUserByEmail(email);
 		if (!user || user.isDisabled) {
 			throw new Error('Invalid credentials.');
@@ -217,7 +326,7 @@ class DataService {
 		// Mandatory TOTP: an enrolled user must clear a code this login; an unenrolled user is forced
 		// into setup. Either way the session starts gated — only the MFA endpoints can lift it.
 		const mfaState = user.totpEnabledAt ? 'challenge_required' : 'setup_required';
-		const session = await this.createSession(user.id, mfaState);
+		const session = await this.createSession(user.id, mfaState, context);
 		return {
 			...session,
 			mfaState,
@@ -370,7 +479,7 @@ class DataService {
 	/** Finish sign-in. A verified assertion mints a session that is already 'satisfied': the
 	 * authenticator proved possession of the device and verified the user on it, and the credential
 	 * only exists because password + TOTP were cleared when it was enrolled. */
-	static async completePasskeyAuthentication({ challengeId, response }) {
+	static async completePasskeyAuthentication({ challengeId, response, context }) {
 		const pending = await this.consumeWebauthnChallenge(challengeId, 'authentication');
 		if (!pending) {
 			throw new Error('That sign-in attempt expired. Try again.');
@@ -402,7 +511,7 @@ class DataService {
 		credential.lastUsedAt = new Date();
 		await credential.save();
 		const user = await this.getUserById(credential.userId);
-		const session = await this.createSession(user.id, 'satisfied');
+		const session = await this.createSession(user.id, 'satisfied', context);
 		return { ...session, mfaState: 'satisfied', user };
 	}
 
@@ -458,7 +567,7 @@ class DataService {
 
 	// Promotes a pending account into `users` and logs it in. The move and the pending-row
 	// deletion run in one transaction so a verified account can never exist in both tables.
-	static async verifyPendingUser(token) {
+	static async verifyPendingUser(token, context) {
 		if (!token) {
 			throw new Error('This verification link is invalid or has expired.');
 		}
@@ -489,7 +598,7 @@ class DataService {
 		});
 		// A newly activated account has no TOTP yet — start the session gated so the app forces
 		// mandatory enrollment before anything else is reachable.
-		const session = await this.createSession(user.id, 'setup_required');
+		const session = await this.createSession(user.id, 'setup_required', context);
 		return {
 			...session,
 			mfaState: 'setup_required',

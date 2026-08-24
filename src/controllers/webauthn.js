@@ -1,5 +1,6 @@
 import DataService from '../services/data_service.js';
 import { getSessionTokenFromCookieHeader, setAuthCookies } from '../utils/auth_cookies.js';
+import { getRequestClientContext } from '../utils/client_context.js';
 
 // Enrolling and revoking are account settings, so they need a fully authenticated session — the
 // same bar as managing push subscriptions. The two sign-in endpoints below deliberately do not.
@@ -70,7 +71,8 @@ async function authenticateVerify(req, res) {
 	try {
 		const result = await DataService.completePasskeyAuthentication({
 			challengeId: req.body?.challengeId,
-			response: req.body?.response
+			response: req.body?.response,
+			context: getRequestClientContext(req)
 		});
 		setAuthCookies(res, req, { token: result.token, user: result.user, mfaState: 'satisfied' });
 		res.json({ status: 'succeeded' });

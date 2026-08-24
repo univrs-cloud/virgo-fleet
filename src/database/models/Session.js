@@ -23,6 +23,22 @@ const Session = sequelize.define('Session', {
 		type: DataTypes.STRING,
 		allowNull: false,
 		defaultValue: 'satisfied'
+	},
+	// Captured at sign-in and never updated — they describe where the session came from, not the
+	// latest request. Null on sessions that predate the profile's session list.
+	ipAddress: {
+		type: DataTypes.STRING,
+		allowNull: true
+	},
+	userAgent: {
+		type: DataTypes.TEXT,
+		allowNull: true
+	},
+	// Written at most once a minute (see DataService.touchSession) so it can't turn every request
+	// into a write.
+	lastSeenAt: {
+		type: DataTypes.DATE,
+		allowNull: true
 	}
 }, {
 	tableName: 'sessions'

@@ -1,5 +1,6 @@
 import DataService from '../../services/data_service.js';
 import { getSessionTokenFromCookieHeader } from '../../utils/auth_cookies.js';
+import { getSocketClientContext } from '../../utils/client_context.js';
 import { sendSignupVerificationEmail } from '../../emails/signup_verification/index.js';
 
 const onConnection = (socket, module) => {
@@ -30,7 +31,8 @@ const onConnection = (socket, module) => {
 		try {
 			const result = await DataService.login({
 				email: config.email,
-				password: config.password
+				password: config.password,
+				context: getSocketClientContext(socket)
 			});
 			ack({ status: 'succeeded', ...result });
 		} catch (error) {

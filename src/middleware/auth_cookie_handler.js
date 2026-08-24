@@ -35,6 +35,10 @@ export default async (req, res, next) => {
 		try {
 			const session = await DataService.getSessionByToken(sessionToken);
 			if (session?.User) {
+				// Not awaited: the write is throttled server-side and no response should wait on it.
+				DataService.touchSession(sessionToken).catch((error) => {
+					console.error('Failed to record fleet session activity:', error);
+				});
 				// Carry the session's MFA state onto the refreshed cookie — otherwise this per-request
 				// re-issue defaults to 'satisfied' and strips the mfa flag that login/verify set, so the
 				// UI would route a gated session into the app instead of the setup/challenge screen.

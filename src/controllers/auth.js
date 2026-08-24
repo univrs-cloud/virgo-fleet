@@ -1,5 +1,6 @@
 import DataService from '../services/data_service.js';
 import { clearAuthCookies, getSessionTokenFromCookieHeader, setAuthCookies } from '../utils/auth_cookies.js';
+import { getRequestClientContext } from '../utils/client_context.js';
 import { sendSignupVerificationEmail } from '../emails/signup_verification/index.js';
 
 async function signup(req, res) {
@@ -32,7 +33,7 @@ async function signup(req, res) {
 // on and the app forces enrollment. Returns JSON — it's a fetch, not a browser navigation.
 async function verify(req, res) {
 	try {
-		const result = await DataService.verifyPendingUser(req.body?.token);
+		const result = await DataService.verifyPendingUser(req.body?.token, getRequestClientContext(req));
 		setAuthCookies(res, req, { token: result.token, user: result.user, mfaState: result.mfaState });
 		res.json({ status: 'succeeded', mfa: result.mfaState === 'satisfied' ? null : result.mfaState });
 	} catch (error) {
@@ -44,7 +45,8 @@ async function login(req, res) {
 	try {
 		const result = await DataService.login({
 			email: req.body?.email,
-			password: req.body?.password
+			password: req.body?.password,
+			context: getRequestClientContext(req)
 		});
 		// The session is gated (setup_required / challenge_required) until MFA is satisfied; the UI
 		// reloads and the account cookie's mfa flag routes it to the setup or challenge screen.
