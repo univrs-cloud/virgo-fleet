@@ -72,6 +72,20 @@ ENV VAPID_PUBLIC_KEY="" \
     VAPID_PRIVATE_KEY="" \
     VAPID_SUBJECT=""
 
+# DNS-01 certificates for nodes on the managed zone. Fleet holds the Cloudflare credential so that
+# nodes never do: a node asks fleet to publish its `_acme-challenge` TXT record over the control
+# socket it already holds, and fleet verifies the name belongs to that node before touching DNS. A
+# Cloudflare token cannot be scoped below a zone, so one token means one zone — CLOUDFLARE_ZONE is a
+# single domain, not a list. Runtime only; the empty defaults below declare the contract, secrets are
+# never baked into the image.
+#   CLOUDFLARE_API_TOKEN  API token scoped to CLOUDFLARE_ZONE with Zone:DNS:Edit
+#   CLOUDFLARE_ZONE       the one managed domain, e.g. "univrs.cloud"
+#   CLOUDFLARE_ZONE_ID    zone id from the zone's overview page; supplying it means the token needs
+#                         no Zone:Read and fleet performs no zone lookup at all
+ENV CLOUDFLARE_API_TOKEN="" \
+    CLOUDFLARE_ZONE="" \
+    CLOUDFLARE_ZONE_ID=""
+
 # Migrations run first, in the entrypoint; a failure there stops the container rather than starting
 # the app against a schema it does not match. CMD stays overridable and still gets migrated first.
 ENTRYPOINT ["./docker-entrypoint.sh"]

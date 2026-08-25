@@ -1,5 +1,7 @@
 import Node from './Node.js';
 import NodeConnectivityEvent from './NodeConnectivityEvent.js';
+import NodeDomain from './NodeDomain.js';
+import AcmeChallenge from './AcmeChallenge.js';
 import Session from './Session.js';
 import PendingUser from './PendingUser.js';
 import User from './User.js';
@@ -74,11 +76,19 @@ User.hasMany(Group, { as: 'createdGroups', foreignKey: 'createdByUserId', onDele
 Node.hasMany(NodeConnectivityEvent, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
 NodeConnectivityEvent.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
 
+Node.hasOne(NodeDomain, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
+NodeDomain.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
+
+Node.hasMany(AcmeChallenge, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
+AcmeChallenge.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
+
 export {
 	User,
 	Group,
 	Node,
 	NodeConnectivityEvent,
+	NodeDomain,
+	AcmeChallenge,
 	Session,
 	PendingUser,
 	RecoveryCode,

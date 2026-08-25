@@ -1,4 +1,5 @@
 import DataService from '../../services/data_service.js';
+import DomainService from '../../services/domain_service.js';
 import { createRateLimiter, getSocketClientAddress } from '../../utils/socket_rate_limit.js';
 
 // node:register is reachable without authentication, verifies fleet credentials and claims a node
@@ -25,6 +26,9 @@ const onConnection = (socket, module) => {
 
 			const nodeId = String(config?.nodeId || '').trim();
 			const name = String(config?.name || '').trim() || nodeId;
+			const hostname = String(config?.hostname || '').trim() || name;
+			const domainName = String(config?.domainName || '').trim();
+			const address = String(config?.address || '').trim();
 			const email = String(config?.email || '').trim().toLowerCase();
 			const password = String(config?.password || '');
 			if (!nodeId || !email || !password) {
@@ -53,6 +57,10 @@ const onConnection = (socket, module) => {
 				nodeId,
 				role: 'owner'
 			});
+			const domain = await DomainService.claim({ nodeId, hostname, domainName, address });
+			if (domain) {
+				await DomainService.syncRecords(nodeId, getSocketClientAddress(socket));
+			}
 			socket.data.nodeId = nodeId;
 			module.setNodeSocket(nodeId, socket);
 			module.eventEmitter.emit('nodes:updated', { userIds: [owner.id] });

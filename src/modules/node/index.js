@@ -3,12 +3,13 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { registerFleetProxy, disconnectNodeClients } from '../../utils/node_proxy.js';
 import { registerNodeSocketGetter, attachNodeAssetHandler, failPendingRequestsForNode } from '../../utils/node_assets.js';
-import eventEmitter from '../../utils/event_emitter.js';
-import PushService from '../../services/push.js';
-import * as socket from '../../socket.js';
-import DataService from '../../services/data_service.js';
 import { authenticateSocketUser } from '../../utils/socket_auth.js';
+import eventEmitter from '../../utils/event_emitter.js';
 import { emitNodes } from './proxy.js';
+import * as socket from '../../socket.js';
+import PushService from '../../services/push.js';
+import DataService from '../../services/data_service.js';
+import DomainService from '../../services/domain_service.js';
 
 const UNREGISTER_TIMEOUT_MS = 5000;
 // How often stale connectivity events (beyond the retention window) are swept.
@@ -109,6 +110,7 @@ class NodeModule {
 	async teardownNode(nodeId) {
 		const affected = await DataService.listNodeMemberUserIds(nodeId);
 		await this.#requestUnregister(nodeId);
+		await DomainService.release(nodeId);
 		await DataService.deleteNode(nodeId);
 		this.disconnectNode(nodeId);
 		this.eventEmitter.emit('nodes:updated', { userIds: affected });

@@ -23,6 +23,11 @@ Never regenerate it — rotating the keys invalidates every existing push subscr
 npx web-push generate-vapid-keys
 ```
 
+The Cloudflare credentials issue the DNS-01 wildcard certificates for nodes on the managed zone. Create a
+token scoped to that one zone with `Zone:DNS:Edit`, and copy the zone id from the zone's overview page so
+the token needs no `Zone:Read`. A Cloudflare token cannot be scoped below a zone, which is why nodes never
+receive it and ask fleet to publish their challenge records instead.
+
 docker-compose.yml
 ```
 services:
@@ -44,6 +49,9 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
+      - CLOUDFLARE_ZONE=${CLOUDFLARE_ZONE}
+      - CLOUDFLARE_ZONE_ID=${CLOUDFLARE_ZONE_ID}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.allowNonRunning=true"
