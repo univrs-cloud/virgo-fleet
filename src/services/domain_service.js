@@ -112,7 +112,7 @@ class DomainService {
 		const probed = (this.isPublicAddress(address) ? 'public' : await this.probeTarget(fqdn, publicIp));
 		const target = (existing?.target === 'public' ? 'public' : probed);
 		if (!existing) {
-			return NodeDomain.create({ nodeId, label, fqdn, lanIp: address, publicIp, target });
+			return NodeDomain.create({ nodeId, label, fqdn, lanIp: address, publicIp: (this.isPublicAddress(publicIp) ? publicIp : null), target });
 		}
 
 		const renamed = existing.fqdn !== fqdn;
@@ -123,7 +123,7 @@ class DomainService {
 		existing.label = label;
 		existing.fqdn = fqdn;
 		existing.lanIp = address || existing.lanIp;
-		existing.publicIp = publicIp || existing.publicIp;
+		existing.publicIp = (this.isPublicAddress(publicIp) ? publicIp : existing.publicIp);
 		existing.target = target;
 		await existing.save();
 		return existing;
@@ -135,7 +135,7 @@ class DomainService {
 			return null;
 		}
 
-		if (publicIp) {
+		if (this.isPublicAddress(publicIp)) {
 			domain.publicIp = publicIp;
 		}
 
