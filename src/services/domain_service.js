@@ -219,36 +219,30 @@ class DomainService {
 			throw new Error('This node has no claimed domain.');
 		}
 
-		const normalized = this.normalizeName(name);
-		if (!normalized.startsWith(CHALLENGE_PREFIX)) {
-			throw new Error('Only _acme-challenge records can be requested.');
+		const expected = `${CHALLENGE_PREFIX}${domain.fqdn}`;
+		if (this.normalizeName(name) !== expected) {
+			throw new Error(`Only ${expected} can be requested by this node.`);
 		}
 
-		const subject = normalized.slice(CHALLENGE_PREFIX.length);
-		if (subject !== domain.fqdn && !subject.endsWith(`.${domain.fqdn}`)) {
-			throw new Error(`${normalized} is outside this node's domain.`);
-		}
-
-		return domain;
+		return { domain, name: expected };
 	}
 
 	static async present(nodeId, name, value) {
-		await this.authorize(nodeId, name);
+		const { name: challenge } = await this.authorize(nodeId, name);
 		const since = new Date(Date.now() - ISSUANCE_WINDOW_MS);
 		const recent = await AcmeChallenge.count({ where: { nodeId, createdAt: { [Op.gte]: since } } });
 		if (recent >= ISSUANCE_LIMIT) {
 			throw new Error('Too many certificate requests this week for this node.');
 		}
 
-		const normalized = this.normalizeName(name);
-		const recordId = await CloudflareService.createTxt(normalized, value);
-		await AcmeChallenge.create({ nodeId, name: normalized, value, recordId });
+		const recordId = await CloudflareService.createTxt(challenge, value);
+		await AcmeChallenge.create({ nodeId, name: challenge, value, recordId });
 		return recordId;
 	}
 
 	static async cleanup(nodeId, name, value) {
-		const normalized = this.normalizeName(name);
-		const challenges = await AcmeChallenge.findAll({ where: { nodeId, name: normalized, value } });
+		const { name: challenge } = await this.authorize(nodeId, name);
+		const challenges = await AcmeChallenge.findAll({ where: { nodeId, name: challenge, value } });
 		for (const challenge of challenges) {
 			await CloudflareService.deleteRecord(challenge.recordId);
 			await challenge.destroy();
