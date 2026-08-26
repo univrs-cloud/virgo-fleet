@@ -57,9 +57,10 @@ const onConnection = (socket, module) => {
 				nodeId,
 				role: 'owner'
 			});
-			const domain = await DomainService.claim({ nodeId, hostname, domainName, address });
+			const publicIp = getSocketClientAddress(socket);
+			const domain = await DomainService.claim({ nodeId, hostname, domainName, address, publicIp });
 			if (domain) {
-				await DomainService.syncRecords(nodeId, getSocketClientAddress(socket));
+				await DomainService.syncRecords(nodeId, publicIp);
 			}
 			socket.data.nodeId = nodeId;
 			module.setNodeSocket(nodeId, socket);

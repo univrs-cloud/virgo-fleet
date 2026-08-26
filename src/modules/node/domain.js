@@ -16,9 +16,10 @@ const onConnection = (socket) => {
 		}
 
 		try {
-			const domain = await DomainService.claim({ nodeId: socket.data.nodeId, hostname, domainName, address });
+			const publicIp = getSocketClientAddress(socket);
+			const domain = await DomainService.claim({ nodeId: socket.data.nodeId, hostname, domainName, address, publicIp });
 			if (domain) {
-				await DomainService.syncRecords(socket.data.nodeId, getSocketClientAddress(socket));
+				await DomainService.syncRecords(socket.data.nodeId, publicIp);
 			}
 
 			ack({ status: 'succeeded', fqdn: domain?.fqdn || null });

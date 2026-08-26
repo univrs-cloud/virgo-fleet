@@ -10,6 +10,7 @@ import * as socket from '../../socket.js';
 import PushService from '../../services/push.js';
 import DataService from '../../services/data_service.js';
 import DomainService from '../../services/domain_service.js';
+import { getSocketClientAddress } from '../../utils/socket_rate_limit.js';
 
 const UNREGISTER_TIMEOUT_MS = 5000;
 // How often stale connectivity events (beyond the retention window) are swept.
@@ -164,6 +165,8 @@ class NodeModule {
 			if (socket.data?.role === 'node' && socket.data?.nodeId) {
 				this.setNodeSocket(socket.data.nodeId, socket);
 				this.#handleNodePresence(socket.data.nodeId, true);
+				DomainService.reprobe(socket.data.nodeId, getSocketClientAddress(socket))
+					.catch((error) => { console.error(`[domains] reprobe failed for ${socket.data.nodeId}: ${error.message}`); });
 				socket.on('node:updates', ({ system, apps } = {}) => {
 					this.#updatesByNodeId.set(socket.data.nodeId, { system, apps });
 					DataService.listNodeMemberUserIds(socket.data.nodeId)

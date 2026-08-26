@@ -1,3 +1,4 @@
+import tls from 'tls';
 import { Op } from 'sequelize';
 import { NodeDomain, AcmeChallenge } from '../database/models/associations.js';
 import CloudflareService from './cloudflare.js';
@@ -10,6 +11,9 @@ const RESERVED_LABELS = new Set([
 const CHALLENGE_PREFIX = '_acme-challenge.';
 const ISSUANCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const ISSUANCE_LIMIT = 12;
+const PROBE_TIMEOUT_MS = 5000;
+const REPROBE_DELAY_MS = 60000;
+const pendingReprobes = new Map();
 const PRIVATE_ADDRESS = /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
 
 class DomainService {
@@ -30,6 +34,42 @@ class DomainService {
 		return Boolean(value) && !PRIVATE_ADDRESS.test(value);
 	}
 
+	static matchesCertificate(fqdn, certificate) {
+		const names = String(certificate?.subjectaltname || '')
+			.split(',')
+			.map((entry) => { return entry.trim().replace(/^DNS:/, '').toLowerCase(); })
+			.filter(Boolean);
+		return names.some((name) => {
+			return name === fqdn || (name.startsWith('*.') && fqdn.endsWith(name.slice(1)) && fqdn.split('.').length === name.split('.').length);
+		});
+	}
+
+	/** Both nodes on one LAN share an egress address, so reachability alone cannot say which of them
+	 * the router forwards to. The probe asks for the node's own name and checks the certificate that
+	 * comes back covers it, so a node answering for someone else does not count as reachable. */
+	static probeTarget(fqdn, publicIp) {
+		return new Promise((resolve) => {
+			if (!publicIp || !this.isPublicAddress(publicIp)) {
+				resolve('lan');
+				return;
+			}
+
+			const socket = tls.connect({
+				host: publicIp,
+				port: 443,
+				servername: fqdn,
+				rejectUnauthorized: false,
+				timeout: PROBE_TIMEOUT_MS
+			}, () => {
+				const matched = this.matchesCertificate(fqdn, socket.getPeerCertificate());
+				socket.destroy();
+				resolve(matched ? 'public' : 'lan');
+			});
+			socket.on('timeout', () => { socket.destroy(); resolve('lan'); });
+			socket.on('error', () => { socket.destroy(); resolve('lan'); });
+		});
+	}
+
 	static async isAvailable(label) {
 		const normalized = this.normalizeLabel(label);
 		if (!normalized || !LABEL_PATTERN.test(normalized)) {
@@ -44,10 +84,21 @@ class DomainService {
 		return taken ? { available: false, reason: 'taken' } : { available: true };
 	}
 
-	static async claim({ nodeId, hostname, domainName, address }) {
+	static async claim({ nodeId, hostname, domainName, address, publicIp }) {
 		const zone = this.getZone();
 		const label = this.normalizeLabel(hostname);
-		if (!zone || this.normalizeLabel(domainName) !== zone) {
+		if (!zone) {
+			console.warn(`[domains] ${nodeId}: no CLOUDFLARE_ZONE configured, skipping claim.`);
+			return null;
+		}
+
+		if (this.normalizeLabel(domainName) !== zone) {
+			console.warn(`[domains] ${nodeId}: domain '${domainName}' is not the managed zone '${zone}', skipping claim.`);
+			return null;
+		}
+
+		if (!label) {
+			console.warn(`[domains] ${nodeId}: no hostname reported, skipping claim.`);
 			return null;
 		}
 
@@ -58,9 +109,10 @@ class DomainService {
 			throw new Error(availability.reason === 'taken' ? `${fqdn} is already taken.` : `${label} is not a usable name.`);
 		}
 
-		const target = (this.isPublicAddress(address) ? 'public' : 'lan');
+		const probed = (this.isPublicAddress(address) ? 'public' : await this.probeTarget(fqdn, publicIp));
+		const target = (existing?.target === 'public' ? 'public' : probed);
 		if (!existing) {
-			return NodeDomain.create({ nodeId, label, fqdn, lanIp: address, target });
+			return NodeDomain.create({ nodeId, label, fqdn, lanIp: address, publicIp, target });
 		}
 
 		const renamed = existing.fqdn !== fqdn;
@@ -71,6 +123,7 @@ class DomainService {
 		existing.label = label;
 		existing.fqdn = fqdn;
 		existing.lanIp = address || existing.lanIp;
+		existing.publicIp = publicIp || existing.publicIp;
 		existing.target = target;
 		await existing.save();
 		return existing;
@@ -88,16 +141,56 @@ class DomainService {
 
 		const address = (domain.target === 'public' ? (domain.publicIp || domain.lanIp) : domain.lanIp);
 		if (!address) {
+			console.warn(`[domains] ${nodeId}: no address reported, ${domain.fqdn} has no A records.`);
 			return domain;
 		}
 
-		const recordIds = {
-			apex: await CloudflareService.upsertA(domain.fqdn, address),
-			wildcard: await CloudflareService.upsertA(`*.${domain.fqdn}`, address)
-		};
+		const recordIds = { ...domain.recordIds };
+		for (const [key, name] of [['apex', domain.fqdn], ['wildcard', `*.${domain.fqdn}`]]) {
+			const [found] = await CloudflareService.findRecords({ type: 'A', name });
+			if (found && !recordIds[key] && found.content !== address) {
+				console.warn(`[domains] ${name} already points at ${found.content}; leaving it alone. Set target/publicIp if fleet should manage it.`);
+				continue;
+			}
+
+			recordIds[key] = await CloudflareService.upsertA(name, address);
+		}
+
 		domain.recordIds = recordIds;
 		await domain.save();
+		console.log(`[domains] ${domain.fqdn} and *.${domain.fqdn} point at ${address} (${domain.target}).`);
 		return domain;
+	}
+
+	/** Cleanup runs before lego has the certificate, so probing immediately would still find nothing
+	 * to match. The delay lets traefik store and serve it first; the timer is per node so the two
+	 * cleanups of a wildcard order collapse into one probe. */
+	static scheduleReprobe(nodeId, publicIp) {
+		clearTimeout(pendingReprobes.get(nodeId));
+		const timer = setTimeout(() => {
+			pendingReprobes.delete(nodeId);
+			this.reprobe(nodeId, publicIp).catch((error) => { console.error(`[domains] reprobe failed for ${nodeId}: ${error.message}`); });
+		}, REPROBE_DELAY_MS);
+		timer.unref();
+		pendingReprobes.set(nodeId, timer);
+	}
+
+	static async reprobe(nodeId, publicIp) {
+		const domain = await NodeDomain.findOne({ where: { nodeId } });
+		if (!domain || !publicIp) {
+			return null;
+		}
+
+		const target = await this.probeTarget(domain.fqdn, publicIp);
+		if (target !== 'public' || domain.target === 'public') {
+			return domain;
+		}
+
+		console.log(`[domains] ${domain.fqdn} is now reachable as '${target}'.`);
+		domain.target = target;
+		domain.publicIp = publicIp;
+		await domain.save();
+		return this.syncRecords(nodeId, publicIp);
 	}
 
 	static async releaseRecords(domain) {
