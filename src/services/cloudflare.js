@@ -33,15 +33,6 @@ class CloudflareService {
 		return record.id;
 	}
 
-	static async upsertCname(name, target) {
-		const [existing] = await this.findRecords({ type: 'CNAME', name });
-		const body = { type: 'CNAME', name, content: target, ttl: 300, proxied: false };
-		const record = existing
-			? await this.#request('PATCH', `/dns_records/${existing.id}`, body)
-			: await this.#request('POST', '/dns_records', body);
-		return record.id;
-	}
-
 	static async deleteRecord(id) {
 		if (!id) {
 			return;

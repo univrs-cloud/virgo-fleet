@@ -147,13 +147,13 @@ class DomainService {
 
 		const wildcard = `*.${domain.fqdn}`;
 		await this.replaceConflicting(domain.fqdn, 'A');
-		await this.replaceConflicting(wildcard, 'CNAME');
+		await this.replaceConflicting(wildcard, 'A');
 		domain.recordIds = {
 			apex: await CloudflareService.upsertA(domain.fqdn, address),
-			wildcard: await CloudflareService.upsertCname(wildcard, domain.fqdn)
+			wildcard: await CloudflareService.upsertA(wildcard, address)
 		};
 		await domain.save();
-		console.log(`[domains] ${domain.fqdn} points at ${address} (${domain.target}); ${wildcard} follows it.`);
+		console.log(`[domains] ${domain.fqdn} and ${wildcard} point at ${address} (${domain.target}).`);
 		return domain;
 	}
 
