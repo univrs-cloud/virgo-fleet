@@ -145,20 +145,15 @@ class DomainService {
 			return domain;
 		}
 
-		const recordIds = { ...domain.recordIds };
-		for (const [key, name] of [['apex', domain.fqdn], ['wildcard', `*.${domain.fqdn}`]]) {
-			const [found] = await CloudflareService.findRecords({ type: 'A', name });
-			if (found && !recordIds[key] && found.content !== address) {
-				console.warn(`[domains] ${name} already points at ${found.content}; leaving it alone. Set target/publicIp if fleet should manage it.`);
-				continue;
-			}
-
-			recordIds[key] = await CloudflareService.upsertA(name, address);
-		}
-
-		domain.recordIds = recordIds;
+		const wildcard = `*.${domain.fqdn}`;
+		await this.replaceConflicting(domain.fqdn, 'A');
+		await this.replaceConflicting(wildcard, 'CNAME');
+		domain.recordIds = {
+			apex: await CloudflareService.upsertA(domain.fqdn, address),
+			wildcard: await CloudflareService.upsertCname(wildcard, domain.fqdn)
+		};
 		await domain.save();
-		console.log(`[domains] ${domain.fqdn} and *.${domain.fqdn} point at ${address} (${domain.target}).`);
+		console.log(`[domains] ${domain.fqdn} points at ${address} (${domain.target}); ${wildcard} follows it.`);
 		return domain;
 	}
 
@@ -191,6 +186,14 @@ class DomainService {
 		domain.publicIp = publicIp;
 		await domain.save();
 		return this.syncRecords(nodeId, publicIp);
+	}
+
+	static async replaceConflicting(name, keep) {
+		const existing = await CloudflareService.findRecords({ name });
+		for (const record of existing.filter((record) => { return record.type !== keep && ['A', 'AAAA', 'CNAME'].includes(record.type); })) {
+			console.log(`[domains] replacing the ${record.type} record at ${name}.`);
+			await CloudflareService.deleteRecord(record.id);
+		}
 	}
 
 	static async releaseRecords(domain) {

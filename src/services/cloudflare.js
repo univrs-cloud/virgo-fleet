@@ -15,7 +15,7 @@ class CloudflareService {
 	}
 
 	static findRecords({ type, name }) {
-		const query = new URLSearchParams({ type, name, per_page: '100' });
+		const query = new URLSearchParams({ ...(type ? { type } : {}), name, per_page: '100' });
 		return this.#request('GET', `/dns_records?${query}`);
 	}
 
@@ -27,6 +27,15 @@ class CloudflareService {
 	static async upsertA(name, address) {
 		const [existing] = await this.findRecords({ type: 'A', name });
 		const body = { type: 'A', name, content: address, ttl: 300, proxied: false };
+		const record = existing
+			? await this.#request('PATCH', `/dns_records/${existing.id}`, body)
+			: await this.#request('POST', '/dns_records', body);
+		return record.id;
+	}
+
+	static async upsertCname(name, target) {
+		const [existing] = await this.findRecords({ type: 'CNAME', name });
+		const body = { type: 'CNAME', name, content: target, ttl: 300, proxied: false };
 		const record = existing
 			? await this.#request('PATCH', `/dns_records/${existing.id}`, body)
 			: await this.#request('POST', '/dns_records', body);
