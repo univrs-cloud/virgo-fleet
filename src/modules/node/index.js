@@ -27,6 +27,7 @@ class NodeModule {
 	#appUpdateJobsByNodeId = new Map();
 	#storageByNodeId = new Map();
 	#upsByNodeId = new Map();
+	#peersByNodeId = new Map();
 
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
@@ -103,6 +104,12 @@ class NodeModule {
 
 	getNodeUps(nodeId) {
 		return this.#upsByNodeId.get(nodeId) ?? null;
+	}
+
+	/** The other node ids this node reports having adopted/been adopted by. Raw as the node sent it —
+	 * not yet filtered to ids the caller can actually see, which is the proxy layer's job. */
+	getNodePeers(nodeId) {
+		return this.#peersByNodeId.get(nodeId) ?? [];
 	}
 
 	/** Fully removes a node from the fleet: asks an online node to unregister (wiping its own fleet
@@ -216,6 +223,12 @@ class NodeModule {
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node ups:', error); });
 				});
+				socket.on('node:peers', (peers) => {
+					this.#peersByNodeId.set(socket.data.nodeId, Array.isArray(peers) ? peers : []);
+					DataService.listNodeMemberUserIds(socket.data.nodeId)
+						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
+						.catch((error) => { console.error('Error broadcasting node peers:', error); });
+				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
 				emitNodes(socket, this).catch((error) => {
@@ -236,6 +249,7 @@ class NodeModule {
 					this.#appUpdateJobsByNodeId.delete(nodeId);
 					this.#storageByNodeId.delete(nodeId);
 					this.#upsByNodeId.delete(nodeId);
+					this.#peersByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.

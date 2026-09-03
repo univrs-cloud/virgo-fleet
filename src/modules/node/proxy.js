@@ -91,6 +91,55 @@ const relayNodeEvent = async (socket, module, { namespace, event }, config, ack)
 	}
 };
 
+/** Clusters accessible nodes that have adopted one another (virtual-IP peering), by nodeId — not by
+ * address, since two sites can share the same private subnet. Adoption is normally mutual (each side
+ * saves the other when pairing), but a peer edge is honoured from either direction so a one-sided
+ * report still clusters. Only ids present in `nodes` count: a node can peer with something outside
+ * this caller's accessible inventory, which must not fold into a visible cluster. A cluster can hold
+ * more than two nodes. Returns a Map of nodeId -> stable clusterId, singletons omitted. */
+const buildClusters = (nodes, module) => {
+	const ids = new Set(nodes.map((node) => { return node.nodeId; }));
+	const parent = new Map(nodes.map((node) => { return [node.nodeId, node.nodeId]; }));
+	const find = (id) => {
+		while (parent.get(id) !== id) {
+			parent.set(id, parent.get(parent.get(id)));
+			id = parent.get(id);
+		}
+		return id;
+	};
+	const union = (a, b) => {
+		const rootA = find(a);
+		const rootB = find(b);
+		if (rootA !== rootB) {
+			parent.set(rootA, rootB);
+		}
+	};
+	for (const node of nodes) {
+		for (const peerId of module.getNodePeers(node.nodeId)) {
+			if (ids.has(peerId)) {
+				union(node.nodeId, peerId);
+			}
+		}
+	}
+	const members = new Map();
+	for (const id of ids) {
+		const root = find(id);
+		if (!members.has(root)) {
+			members.set(root, []);
+		}
+		members.get(root).push(id);
+	}
+	const clusterIdByNodeId = new Map();
+	for (const group of members.values()) {
+		if (group.length < 2) {
+			continue;
+		}
+		const clusterId = [...group].sort().join(':');
+		group.forEach((id) => { clusterIdByNodeId.set(id, clusterId); });
+	}
+	return clusterIdByNodeId;
+};
+
 const emitNodes = async (socket, module) => {
 	try {
 		if (!socket.isAuthenticated) {
@@ -108,6 +157,7 @@ const emitNodes = async (socket, module) => {
 			}
 			eventsByNodeId.get(event.nodeId).push(event);
 		}
+		const clusterIdByNodeId = buildClusters(nodes, module);
 		const inventory = await Promise.all(nodes.map(async (node) => {
 			const online = module.isNodeOnline(node.nodeId);
 			const entry = {
@@ -118,6 +168,7 @@ const emitNodes = async (socket, module) => {
 				appUpdateJobs: module.getNodeAppUpdateJobs(node.nodeId),
 				storage: module.getNodeStorage(node.nodeId),
 				ups: module.getNodeUps(node.nodeId),
+				clusterId: clusterIdByNodeId.get(node.nodeId) || null,
 				connectivity: buildConnectivitySegments({
 					events: eventsByNodeId.get(node.nodeId) || [],
 					windowStartMs,
