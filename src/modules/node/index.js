@@ -28,6 +28,8 @@ class NodeModule {
 	#storageByNodeId = new Map();
 	#upsByNodeId = new Map();
 	#peersByNodeId = new Map();
+	#machineIdByNodeId = new Map();
+	#nodeIdByMachineId = new Map();
 
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
@@ -106,10 +108,12 @@ class NodeModule {
 		return this.#upsByNodeId.get(nodeId) ?? null;
 	}
 
-	/** The other node ids this node reports having adopted/been adopted by. Raw as the node sent it —
-	 * not yet filtered to ids the caller can actually see, which is the proxy layer's job. */
 	getNodePeers(nodeId) {
 		return this.#peersByNodeId.get(nodeId) ?? [];
+	}
+
+	getNodeIdForMachineId(machineId) {
+		return this.#nodeIdByMachineId.get(machineId) ?? null;
 	}
 
 	/** Fully removes a node from the fleet: asks an online node to unregister (wiping its own fleet
@@ -223,7 +227,15 @@ class NodeModule {
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node ups:', error); });
 				});
-				socket.on('node:peers', (peers) => {
+				socket.on('node:peers', ({ selfId, peers } = {}) => {
+					if (selfId) {
+						const previousMachineId = this.#machineIdByNodeId.get(socket.data.nodeId);
+						if (previousMachineId && previousMachineId !== selfId) {
+							this.#nodeIdByMachineId.delete(previousMachineId);
+						}
+						this.#machineIdByNodeId.set(socket.data.nodeId, selfId);
+						this.#nodeIdByMachineId.set(selfId, socket.data.nodeId);
+					}
 					this.#peersByNodeId.set(socket.data.nodeId, Array.isArray(peers) ? peers : []);
 					DataService.listNodeMemberUserIds(socket.data.nodeId)
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
@@ -250,6 +262,11 @@ class NodeModule {
 					this.#storageByNodeId.delete(nodeId);
 					this.#upsByNodeId.delete(nodeId);
 					this.#peersByNodeId.delete(nodeId);
+					const machineId = this.#machineIdByNodeId.get(nodeId);
+					if (machineId) {
+						this.#nodeIdByMachineId.delete(machineId);
+					}
+					this.#machineIdByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.

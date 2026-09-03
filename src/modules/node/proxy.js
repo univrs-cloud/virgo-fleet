@@ -91,12 +91,6 @@ const relayNodeEvent = async (socket, module, { namespace, event }, config, ack)
 	}
 };
 
-/** Clusters accessible nodes that have adopted one another (virtual-IP peering), by nodeId — not by
- * address, since two sites can share the same private subnet. Adoption is normally mutual (each side
- * saves the other when pairing), but a peer edge is honoured from either direction so a one-sided
- * report still clusters. Only ids present in `nodes` count: a node can peer with something outside
- * this caller's accessible inventory, which must not fold into a visible cluster. A cluster can hold
- * more than two nodes. Returns a Map of nodeId -> stable clusterId, singletons omitted. */
 const buildClusters = (nodes, module) => {
 	const ids = new Set(nodes.map((node) => { return node.nodeId; }));
 	const parent = new Map(nodes.map((node) => { return [node.nodeId, node.nodeId]; }));
@@ -115,9 +109,10 @@ const buildClusters = (nodes, module) => {
 		}
 	};
 	for (const node of nodes) {
-		for (const peerId of module.getNodePeers(node.nodeId)) {
-			if (ids.has(peerId)) {
-				union(node.nodeId, peerId);
+		for (const machineId of module.getNodePeers(node.nodeId)) {
+			const peerNodeId = module.getNodeIdForMachineId(machineId);
+			if (peerNodeId && ids.has(peerNodeId)) {
+				union(node.nodeId, peerNodeId);
 			}
 		}
 	}
