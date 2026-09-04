@@ -40,16 +40,32 @@ relay, which is what the `coturn` sidecar below provides. Fleet stays the automa
 that doesn't advertise support, a browser without WebRTC, or a data channel that fails to establish
 all transparently keep using the Socket.IO proxy.
 
-The page always opens the Socket.IO proxy first and *upgrades* to the data channel once it is up, so
-a node that can never establish one costs nothing visible — no stall, no retry storm. A node that
-does not advertise the capability is refused at `webrtc:session:request` rather than left to time
-out, and a failed attempt puts that node on a one-minute cooldown for the page.
+The page always opens the Socket.IO proxy first and prepares the data channel in parallel. A hard
+five-second browser deadline leaves the page on Socket.IO if negotiation is slow. Once both paths
+are ready, each WebRTC namespace is explicitly activated, new operations use it, and the old proxy
+is disconnected after acknowledged operations have drained within their existing timeouts. Until that
+activation the node suppresses the prepared namespace's events, so the UI has only one active event
+source. A node that does not advertise the capability is refused at `webrtc:session:request`, and a
+failed attempt puts that node on a one-minute cooldown for the page.
+
+Fleet and the node record negotiation monotonically as `REQUESTED` → `OPEN_SENT` →
+`OFFER_RECEIVED` → `ANSWERED` → `CONNECTED` → `CLOSING` → `CLOSED`. Fleet keeps a 30-second
+negotiation cleanup timer as a server-side safety net; it is separate from the five-second browser
+experience deadline.
 
 The relay only carries sessions where **neither** peer can be reached directly. A node behind CGNAT
 usually still connects directly when the admin's own NAT is endpoint-independent, so the relay is
-for both-ends-symmetric and UDP-blocked networks. Note the node half is **UDP-relay only** —
-`node-datachannel` is built against libjuice, which has no TURN-over-TCP — so the `?transport=tcp`
-URL fleet advertises helps browsers on UDP-blocked networks but never nodes.
+for both-ends-symmetric and UDP-blocked networks. The browser receives both UDP and TCP TURN URLs,
+but the node deliberately keeps only UDP. The packaged `node-datachannel` uses libjuice: although
+its binding exposes `TurnTcp`/`TurnTls` enum values, TURN control over TCP/TLS requires a libnice
+build. Thus a UDP-blocked browser can use TURN/TCP, while a UDP-blocked node remains on Socket.IO.
+
+HTML and static assets stay on the HTTP/Socket.IO bootstrap path because they are needed before a
+data channel can exist. Asset chunks are binary Socket.IO attachments, streamed one at a time with
+an acknowledgement and HTTP response backpressure; they are never JSON-stringified into WebRTC
+control frames. The data channel carries the smaller namespace control/event protocol.
+Both data-channel writers use an ordered queue, pause above a 1 MiB native buffer, resume from the
+buffered-amount-low callback, and close the session rather than exceed an 8 MiB aggregate bound.
 
 `coturn` runs as its own container in the compose stack — not inside the fleet image (a crash there
 would take the app down and relay bandwidth would contend with the signaling loop). It uses

@@ -20,10 +20,34 @@ const SIGNAL_NAMESPACE_PATTERN = /^\/fleet\/[^/]+\/signal$/;
 // an ICE restart. Past that it is a misbehaving client, not a real need.
 const MAX_SESSIONS_PER_SOCKET = 4;
 const SESSION_REQUEST_WINDOW_MS = 60 * 1000;
+const NEGOTIATION_TIMEOUT_MS = 30 * 1000;
+
+const SESSION_STATE = Object.freeze({
+	REQUESTED: 'REQUESTED',
+	OPEN_SENT: 'OPEN_SENT',
+	OFFER_RECEIVED: 'OFFER_RECEIVED',
+	ANSWERED: 'ANSWERED',
+	CONNECTED: 'CONNECTED',
+	CLOSING: 'CLOSING',
+	CLOSED: 'CLOSED'
+});
+const SESSION_STATE_ORDER = Object.freeze(Object.values(SESSION_STATE).reduce((result, state, index) => {
+	result[state] = index;
+	return result;
+}, {}));
+
+const transitionSession = (session, nextState) => {
+	if (!session || SESSION_STATE_ORDER[nextState] < SESSION_STATE_ORDER[session.state]) {
+		return false;
+	}
+	session.state = nextState;
+	session.stateChangedAt = Date.now();
+	return true;
+};
 
 const sessionRequestLimiter = createRateLimiter({ windowMs: SESSION_REQUEST_WINDOW_MS, max: 60 });
 
-// sessionId -> { clientSocket, nodeSocket, nodeId, userId }
+// sessionId -> { clientSocket, nodeSocket, nodeId, userId, state, negotiationTimer }
 const sessions = new Map();
 // nodeId -> Set<sessionId>, userId -> Set<sessionId>: reverse indexes for the teardown hooks.
 const sessionsByNodeId = new Map();
@@ -78,9 +102,13 @@ const forgetSession = (sessionId) => {
 	if (!session) {
 		return;
 	}
+	transitionSession(session, SESSION_STATE.CLOSING);
+	clearTimeout(session.negotiationTimer);
+	session.negotiationTimer = null;
 	sessions.delete(sessionId);
 	indexRemove(sessionsByNodeId, session.nodeId, sessionId);
 	indexRemove(sessionsByUserId, session.userId, sessionId);
+	transitionSession(session, SESSION_STATE.CLOSED);
 };
 
 const countSessionsForClient = (clientSocket) => {
@@ -115,6 +143,12 @@ const attachNodeWebrtcSignaling = (nodeSocket) => {
 			if (!session || session.nodeId !== nodeSocket.data.nodeId) {
 				return;
 			}
+			if (event === 'webrtc:answer') {
+				if (session.state !== SESSION_STATE.OFFER_RECEIVED) {
+					return;
+				}
+				transitionSession(session, SESSION_STATE.ANSWERED);
+			}
 			session.clientSocket.emit(event, { sessionId, ...rest });
 			if (event === 'webrtc:close' || event === 'webrtc:error') {
 				forgetSession(sessionId);
@@ -126,6 +160,15 @@ const attachNodeWebrtcSignaling = (nodeSocket) => {
 	nodeSocket.on('webrtc:candidate', relayToClient('webrtc:candidate'));
 	nodeSocket.on('webrtc:close', relayToClient('webrtc:close'));
 	nodeSocket.on('webrtc:error', relayToClient('webrtc:error'));
+	nodeSocket.on('webrtc:connected', ({ sessionId } = {}) => {
+		const session = sessions.get(sessionId);
+		if (!session || session.nodeId !== nodeSocket.data.nodeId) {
+			return;
+		}
+		transitionSession(session, SESSION_STATE.CONNECTED);
+		clearTimeout(session.negotiationTimer);
+		session.negotiationTimer = null;
+	});
 };
 
 const handleSessionRequest = async (clientSocket, nodeId, ack) => {
@@ -176,11 +219,31 @@ const handleSessionRequest = async (clientSocket, nodeId, ack) => {
 		nodeToken
 	});
 
-	sessions.set(sessionId, { clientSocket, nodeSocket, nodeId, userId: clientSocket.userId });
+	const session = {
+		clientSocket,
+		nodeSocket,
+		nodeId,
+		userId: clientSocket.userId,
+		state: SESSION_STATE.REQUESTED,
+		stateChangedAt: Date.now(),
+		negotiationTimer: null
+	};
+	sessions.set(sessionId, session);
 	indexAdd(sessionsByNodeId, nodeId, sessionId);
 	indexAdd(sessionsByUserId, clientSocket.userId, sessionId);
 
 	nodeSocket.emit('webrtc:open', { sessionId, token, iceServers: servers });
+	transitionSession(session, SESSION_STATE.OPEN_SENT);
+	session.negotiationTimer = setTimeout(() => {
+		const current = sessions.get(sessionId);
+		if (!current || current.state === SESSION_STATE.CONNECTED) {
+			return;
+		}
+		tellSessionNode(current, 'webrtc:close', { sessionId });
+		current.clientSocket.emit('webrtc:close', { sessionId, reason: 'negotiation-timeout' });
+		forgetSession(sessionId);
+	}, NEGOTIATION_TIMEOUT_MS);
+	session.negotiationTimer.unref?.();
 	ack({ status: 'succeeded', sessionId, iceServers: servers, token });
 };
 
@@ -240,7 +303,8 @@ const registerWebrtcSignaling = (io, nodeSocketGetter, capabilitiesGetter) => {
 
 		clientSocket.on('webrtc:offer', ({ sessionId, sdp, token } = {}) => {
 			const session = sessions.get(sessionId);
-			if (session?.clientSocket === clientSocket) {
+			if (session?.clientSocket === clientSocket && session.state === SESSION_STATE.OPEN_SENT) {
+				transitionSession(session, SESSION_STATE.OFFER_RECEIVED);
 				tellSessionNode(session, 'webrtc:offer', { sessionId, sdp, token });
 			}
 		});
