@@ -34,58 +34,18 @@ receive it and ask fleet to publish their challenge records instead.
 
 ## TURN server
 
-When a browser opens a node's UI, fleet no longer proxies the node's namespace/API traffic through its
-own event loop — the browser and the node hold a direct WebRTC data channel and fleet only relays the
-signaling. A node on a public address is reached directly; a node behind CGNAT is reached through a
-relay, which is what the `coturn` sidecar below provides. Fleet stays the automatic fallback: a node
-that doesn't advertise support, a browser without WebRTC, or a data channel that fails to establish
-all transparently keep using the Socket.IO proxy.
-
-The page always opens the Socket.IO proxy first and prepares the data channel in parallel. A hard
-five-second browser deadline leaves the page on Socket.IO if negotiation is slow. Once both paths
-are ready, each WebRTC namespace is explicitly activated, new operations use it, and the old proxy
-is disconnected after acknowledged operations have drained within their existing timeouts. Until that
-activation the node suppresses the prepared namespace's events, so the UI has only one active event
-source. A node that does not advertise the capability is refused at `webrtc:session:request`, and a
-failed attempt puts that node on a one-minute cooldown for the page.
-
-Fleet and the node record negotiation monotonically as `REQUESTED` → `OPEN_SENT` →
-`OFFER_RECEIVED` → `ANSWERED` → `CONNECTED` → `CLOSING` → `CLOSED`. Fleet keeps a 30-second
-negotiation cleanup timer as a server-side safety net; it is separate from the five-second browser
-experience deadline.
+When a browser opens a node's UI, the browser and the node hold a direct WebRTC data channel and
+fleet only relays the signaling. A node on a public address is reached directly; a node behind
+CGNAT is reached through a relay, which is what the `coturn` sidecar below provides. Fleet stays the
+automatic fallback: a node that doesn't advertise support, a browser without WebRTC, or a data
+channel that fails to establish all transparently keep using the Socket.IO proxy.
 
 The relay only carries sessions where **neither** peer can be reached directly. A node behind CGNAT
 usually still connects directly when the admin's own NAT is endpoint-independent, so the relay is
 for both-ends-symmetric and UDP-blocked networks. The browser receives the UDP and TCP TURN URLs
-(and the `turns` one when `TURN_TLS_PORT` is set), but the node deliberately keeps only UDP. The
-packaged `node-datachannel` uses libjuice: although its binding exposes `TurnTcp`/`TurnTls` enum
-values, TURN control over TCP/TLS requires a libnice build. Thus a UDP-blocked browser can use
-TURN/TCP, while a UDP-blocked node remains on Socket.IO.
-
-The document and its boot bundle stay on the HTTP/Socket.IO path because they are needed before a
-data channel can exist. Everything the page requests afterwards — lazy chunks, images, fonts — is
-routed over the data channel instead: a service worker on the fleet origin intercepts
-`/nodes/{id}/*` asset requests, hands them to the requesting page, and the page streams them from
-the node over a second `assets` channel. The fleet path stays the fallback, taken whenever there is
-no live transport or anything fails, so the worker can only ever add a route, never remove one.
-Asset frames are binary (a tag, a request id and raw bytes) on their own channel, so a large chunk
-never head-of-line-blocks the control/event protocol, and a cancelled request aborts the node-side
-stream rather than paying for the rest of it. Because the worker answers these requests itself the
-browser HTTP cache no longer serves them; each load re-pulls over the data channel, which costs the
-fleet nothing but is not free for the node.
-
-Both data-channel writers use an ordered queue, pause above a 1 MiB native buffer, resume from the
-buffered-amount-low callback, and close the session rather than exceed an 8 MiB aggregate bound. The
-node paces an asset stream against that queue, so a slow link throttles the read from its own API
-rather than accumulating in memory.
-
-Once connected, the browser pings over the data channel every 15 seconds and both ends drop a
-session that has gone 45 seconds without inbound traffic. ICE consent freshness only proves the path
-is up; this is what catches a peer whose process has wedged with the channel still open, and it
-replaces the engine.io ping/pong the Socket.IO path provided. Both ends advertise `heartbeat` in
-their HELLO and arm the watchdog only if the other side did, so a mixed-version pair stays quiet and
-keeps working. A transport with no open namespace is closed after 30 seconds, late enough that
-moving between node pages reuses the peer connection instead of renegotiating one.
+(and the `turns` one when `TURN_TLS_PORT` is set), but the node deliberately keeps only UDP: the
+packaged `node-datachannel` uses libjuice, whose TURN control over TCP/TLS needs a libnice build. So
+a UDP-blocked browser can use TURN/TCP, while a UDP-blocked node remains on Socket.IO.
 
 `coturn` runs as its own container in the compose stack — not inside the fleet image (a crash there
 would take the app down and relay bandwidth would contend with the signaling loop). It uses
@@ -102,7 +62,8 @@ its allowed-peer list (`Whitelisting external-ip private part` in the log), whic
 `--denied-peer-ip` entry covering the host's own LAN and turns the relay into a path to every
 service on it. Pinning gives the same precision without that.
 
-Like `nextcloud-hpb`'s `aio-talk`, Traefik isn't involved and there is no TLS (no certificate).
+coturn holds no certificate of its own and terminates no TLS — the optional `turns` leg above is
+terminated by Traefik and reaches coturn as plain TURN/TCP.
 coturn runs on **host networking** rather than publishing ports: a TURN relay binds a fresh UDP
 port per allocation out of `TURN_MIN_PORT`–`TURN_MAX_PORT`, and publishing a range that size
 means a `docker-proxy` process and a DNAT rule per port. On the host network it just binds them.
@@ -123,34 +84,61 @@ fleet advertises both so a client on a network that blocks UDP can still reach `
 a UDP relay allocation behind it.
 
 **Reaching the relay from a locked-down network.** `3477/tcp` and `3477/udp` are both blocked on
-networks that permit nothing but 443, which leaves such a browser with no relay at all. Setting
-`TURN_TLS_PORT=443` makes fleet advertise a third URL, `turns:relay.${DOMAIN}:443?transport=tcp`,
-alongside the two on 3477. coturn keeps `--no-tls` and grows no listener: Traefik already owns 443,
-so it terminates the TLS and proxies the plaintext TURN/TCP stream to coturn's existing `3477/tcp`.
-TURN-over-TLS is TURN-over-TCP inside TLS, so coturn needs no certificate of its own and the relay
-allocation behind it is still UDP.
+networks that permit nothing but 443, leaving such a browser with no relay at all. `TURN_TLS_PORT=443`
+makes fleet advertise a third URL, `turns:relay.${DOMAIN}:443?transport=tcp`. coturn keeps `--no-tls`
+and grows no listener: Traefik already owns 443, terminates the TLS, and proxies the plaintext
+TURN/TCP to coturn's existing `3477/tcp`. The relay allocation behind it is still UDP.
 
-Add a TCP router on the existing https entrypoint. A TCP router with a specific `HostSNI` wins over
-the HTTP routers sharing the entrypoint, so `fleet.${DOMAIN}` is unaffected:
+This must go through Traefik's **file** provider, not Docker labels: coturn is on host networking, so
+the Docker provider has no container IP to build a service from and drops it silently. The file
+provider takes a literal address, which is why the compose below gives coturn a second
+`--listening-ip=172.30.0.1` alongside the LAN one. That adds a control socket only — `--relay-ip`
+stays pinned to `TURN_INTERNAL_IP`, so no new private candidate is advertised, and the relay still
+cannot be aimed at that address because `--denied-peer-ip=172.16.0.0-172.31.255.255` covers it.
+
+Drop `turns.yml` into the Traefik file-provider directory (`/messier/apps/traefik/config/`, mounted
+and watched, so no restart). Keep it out of the Traefik stack's fetched config — it belongs only on a
+host running fleet. Template **nothing** here: Traefik resolves `{{ env ... }}` against its own
+`.env`, where `DOMAIN` is that host's name and `CERTRESOLVER` issues for that host's zone. Both
+differ from the fleet stack's, and getting either wrong shows up as `TRAEFIK DEFAULT CERT` on the
+wire while the dashboard still reads `Success`. Substitute your own values:
 ```
-      - "traefik.enable=true"
-      - "traefik.tcp.routers.turns.rule=HostSNI(`relay.${DOMAIN}`)"
-      - "traefik.tcp.routers.turns.entrypoints=https"
-      - "traefik.tcp.routers.turns.tls.certresolver=${CERTRESOLVER:+${CERTRESOLVER}}"
-      - "traefik.tcp.services.turns.loadbalancer.server.address=${TURN_INTERNAL_IP}:${TURN_LISTENING_PORT:-3477}"
+tcp:
+  routers:
+    turns:
+      rule: "HostSNI(`relay.univrs.cloud`)"
+      entryPoints:
+        - "https"
+      service: "turns"
+      tls:
+        certResolver: "le"
+        domains:
+          - main: "relay.univrs.cloud"
+
+  services:
+    turns:
+      loadBalancer:
+        servers:
+          - address: "172.30.0.1:3477"
 ```
-`relay.${DOMAIN}` already resolves to this host for the UDP/TCP URLs, so no new DNS record is needed
-— but it must now also be covered by the certificate, since the browser validates SNI before any
-TURN message is sent.
+The name must match `relay.${DOMAIN}` as the *fleet* service sees `DOMAIN` — that is what `turn.js`
+advertises to both peers — and the resolver must have authority over that zone, so use the one the
+fleet service itself uses. `domains:` is stated rather than left for Traefik to derive from
+`HostSNI`, and a specific `HostSNI` wins over the HTTP routers sharing the entrypoint, so
+`fleet.${DOMAIN}` is unaffected.
 
-Leave `TURN_TLS_PORT` unset until that router is in place. An advertised TURN URL that nothing
-answers is not free: the browser gathers against it and waits for it to time out before ICE
-completes, so a dead `turns` URL slows down every session it is offered to.
+Confirm before enabling. The dashboard's **TCP Routers** page should list `turns@file` with the rule
+naming the FQDN you expect, then:
+```
+printf 'GET / HTTP/1.1\r\nHost: relay.${DOMAIN}\r\n\r\n' \
+  | openssl s_client -connect relay.${DOMAIN}:443 -servername relay.${DOMAIN} -quiet
+```
+The certificate must cover `relay.${DOMAIN}` and the request must draw **no** HTTP response — coturn
+closing on a non-TURN message. An `HTTP/1.1` status line means the HTTP catch-all took it. The
+handshake alone proves nothing: the catch-all presents the same certificate and also sits idle.
 
-Because Traefik terminates, coturn sees these clients with Traefik's address rather than their own.
-Nothing here is keyed on client IP — authentication is the HMAC credential and `--denied-peer-ip`
-filters the *peer* (relay target) address, not the client — but a future per-client-IP limit would
-lump every TLS client together.
+Leave `TURN_TLS_PORT` unset until that passes. An advertised TURN URL that nothing answers is not
+free — the browser gathers against it and waits out the timeout before ICE completes.
 
 The relay is reachable by any signed-in fleet user (they read a 300s credential out of their
 session ack), so `--denied-peer-ip` blocks the RFC1918 ranges **and loopback** — nodes are relayed
@@ -159,14 +147,13 @@ docker networks, the host LAN, or anything bound to `127.0.0.1`. coturn does not
 its own, and host networking puts the host's own loopback services one `CreatePermission` away, so
 that entry is as load-bearing as the RFC1918 ones.
 
-**Nextcloud Talk HPB coexistence.** If this host also runs `nextcloud-hpb`, its `aio-talk` container
-already binds `3478/tcp+udp`. coturn's `3477` clears it only with `--alt-listening-port=0`:
-`--alt-listening-port` defaults to `listening-port + 1`, so a bare `--listening-port=3477` would
-bind 3478 as well for RFC 5780 NAT discovery and collide with aio-talk. That discovery needs two
-addresses anyway and is already disabled here (`RFC5780 disabled` in the startup log). The fleet
-stack also keeps its own `.env`, separate from the `nextcloud-hpb` stack's, so the shared `TURN_*`
-names don't cross. Verify after `docker compose up` — 3477 should be this stack's and 3478 should
-still be aio-talk's:
+**Port choice.** coturn listens on `3477` rather than the standard `3478`, leaving 3478 free for
+another TURN server sharing the host. That only holds with `--alt-listening-port=0`:
+`--alt-listening-port` defaults to `listening-port + 1`, so a bare `--listening-port=3477` binds
+3478 as well for RFC 5780 NAT discovery. That discovery needs two addresses anyway and is already
+disabled here (`RFC5780 disabled` in the startup log). `TURN_*` are generic names, so keep this
+stack's `.env` to itself rather than sharing one with another stack that uses them. Verify what
+bound what after `docker compose up`:
 ```
 ss -lntup | grep -E ':3478|:3477'
 ```
@@ -199,6 +186,10 @@ sudo netfilter-persistent save
 A `RELATED,ESTABLISHED` rule does not cover the relay range: those ports are inbound-first, so the
 peer's first connectivity check is `NEW` and hits the drop. A cloud security group, if the host has
 one, needs all three too.
+
+Each connected node holds a control socket open, so the default 1024 fd limit is exhausted well
+before a few hundred nodes (plus proxied user sessions); the fleet service raises `nofile` to keep
+the accept path off `EMFILE` during a reconnect storm.
 
 docker-compose.yml
 ```
@@ -243,9 +234,6 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
-    # Each connected node holds a control socket open; the default 1024 fd limit is exhausted
-    # well before a few hundred nodes (plus proxied user sessions). Raise it so the accept path
-    # doesn't hit EMFILE during a reconnect storm.
     ulimits:
       nofile:
         soft: 65536
@@ -268,12 +256,6 @@ services:
       - internal
     restart: unless-stopped
 
-  # Relays the browser <-> node WebRTC data channel for nodes that can't be reached directly (CGNAT).
-  # Mirrors nextcloud-hpb's aio-talk: no Traefik, no TLS, and a control port of 3477 (which also
-  # clears aio-talk's 3478). Host networking because relay allocations are UDP (the only kind
-  # browsers ask for) and a published range costs a docker-proxy process per port; --listening-ip
-  # and --relay-ip pin it to the forwarded interface, and --denied-peer-ip keeps the relay off the
-  # docker networks and the host LAN.
   coturn:
     image: coturn/coturn:latest
     network_mode: host
@@ -282,6 +264,7 @@ services:
       - --use-auth-secret
       - --static-auth-secret=${TURN_SECRET_KEY}
       - --listening-ip=${TURN_INTERNAL_IP}
+      - --listening-ip=172.30.0.1
       - --relay-ip=${TURN_INTERNAL_IP}
       - --listening-port=${TURN_LISTENING_PORT:-3477}
       - --alt-listening-port=0
