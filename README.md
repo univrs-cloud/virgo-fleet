@@ -87,16 +87,22 @@ fleet advertises both so a client on a network that blocks UDP can still reach `
 a UDP relay allocation behind it.
 
 The relay is reachable by any signed-in fleet user (they read a 300s credential out of their
-session ack), so `--denied-peer-ip` blocks the RFC1918 ranges — nodes are relayed to on public
-addresses, so this costs nothing and keeps the relay from being an open path into the docker
-networks or the host LAN. Host networking makes that list load-bearing rather than optional.
+session ack), so `--denied-peer-ip` blocks the RFC1918 ranges **and loopback** — nodes are relayed
+to on public addresses, so this costs nothing and keeps the relay from being an open path into the
+docker networks, the host LAN, or anything bound to `127.0.0.1`. coturn does not deny loopback on
+its own, and host networking puts the host's own loopback services one `CreatePermission` away, so
+that entry is as load-bearing as the RFC1918 ones.
 
 **Nextcloud Talk HPB coexistence.** If this host also runs `nextcloud-hpb`, its `aio-talk` container
-already binds `3478/tcp+udp`; coturn's `3477` clears it, and the fleet stack keeps its own `.env`
-separate from the `nextcloud-hpb` stack's so the shared `TURN_*` names don't cross. Verify after
-`docker compose up`:
+already binds `3478/tcp+udp`. coturn's `3477` clears it only with `--alt-listening-port=0`:
+`--alt-listening-port` defaults to `listening-port + 1`, so a bare `--listening-port=3477` would
+bind 3478 as well for RFC 5780 NAT discovery and collide with aio-talk. That discovery needs two
+addresses anyway and is already disabled here (`RFC5780 disabled` in the startup log). The fleet
+stack also keeps its own `.env`, separate from the `nextcloud-hpb` stack's, so the shared `TURN_*`
+names don't cross. Verify after `docker compose up` — 3477 should be this stack's and 3478 should
+still be aio-talk's:
 ```
-ss -lunp | grep -E ':3478|:3477'
+ss -lntup | grep -E ':3478|:3477'
 ```
 
 **Environment.**
@@ -210,6 +216,7 @@ services:
       - --listening-ip=${TURN_INTERNAL_IP}
       - --relay-ip=${TURN_INTERNAL_IP}
       - --listening-port=${TURN_LISTENING_PORT:-3477}
+      - --alt-listening-port=0
       - --min-port=${TURN_MIN_PORT:-61000}
       - --max-port=${TURN_MAX_PORT:-61500}
       - --total-quota=400
@@ -217,6 +224,7 @@ services:
       - --no-multicast-peers
       - --denied-peer-ip=0.0.0.0-0.255.255.255
       - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
       - --denied-peer-ip=100.64.0.0-100.127.255.255
       - --denied-peer-ip=169.254.0.0-169.254.255.255
       - --denied-peer-ip=172.16.0.0-172.31.255.255
