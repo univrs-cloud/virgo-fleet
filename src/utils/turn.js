@@ -16,6 +16,7 @@ const settings = () => {
 		secret: String(process.env.TURN_SECRET_KEY || '').trim(),
 		host: domain ? `relay.${domain}` : '',
 		listeningPort: Number(process.env.TURN_LISTENING_PORT) || DEFAULT_LISTENING_PORT,
+		tlsPort: Number(process.env.TURN_TLS_PORT) || 0,
 		ttlSeconds: Number(process.env.TURN_TTL_SECONDS) || DEFAULT_TTL_SECONDS
 	};
 };
@@ -36,22 +37,28 @@ const mintTurnCredentials = (userId) => {
 
 /** The ICE server list handed to a browser and to a node for one WebRTC session. Always includes
  * STUN when a host is configured; includes TURN only when a secret is set, so an unconfigured
- * fleet still signals but offers direct-only connectivity. Both TURN transports are advertised:
- * `transport` selects the peer's leg to coturn (TCP gets through networks that block UDP), not the
- * relay allocation itself, which browsers always request over UDP. */
+ * fleet still signals but offers direct-only connectivity. Every advertised TURN transport selects
+ * the peer's own leg to coturn, not the relay allocation itself, which browsers always request over
+ * UDP. UDP and TCP reach the control port directly; `turns` is advertised only when TURN_TLS_PORT is
+ * set, which requires the Traefik TCP router described in the README, and is what gets a browser out
+ * of a network that permits nothing but 443. */
 const iceServers = (userId) => {
-	const { host, listeningPort } = settings();
+	const { host, listeningPort, tlsPort } = settings();
 	if (!host) {
 		return [];
 	}
 	const servers = [{ urls: `stun:${host}:${listeningPort}` }];
 	const credentials = mintTurnCredentials(userId);
 	if (credentials) {
+		const urls = [
+			`turn:${host}:${listeningPort}?transport=udp`,
+			`turn:${host}:${listeningPort}?transport=tcp`
+		];
+		if (tlsPort) {
+			urls.push(`turns:${host}:${tlsPort}?transport=tcp`);
+		}
 		servers.push({
-			urls: [
-				`turn:${host}:${listeningPort}?transport=udp`,
-				`turn:${host}:${listeningPort}?transport=tcp`
-			],
+			urls,
 			username: credentials.username,
 			credential: credentials.credential
 		});

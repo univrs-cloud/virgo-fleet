@@ -9,6 +9,7 @@ MFA_SECRET_KEY='a-long-random-string'
 TURN_SECRET_KEY='a-long-random-string'
 TURN_EXTERNAL_IP='your.public.ip.address'
 TURN_INTERNAL_IP='the.host.lan.address'
+TURN_TLS_PORT='443'
 SMTP_HOST='smtp.your.provider'
 SMTP_PORT='587'
 SMTP_SECURE='false'
@@ -55,17 +56,36 @@ experience deadline.
 
 The relay only carries sessions where **neither** peer can be reached directly. A node behind CGNAT
 usually still connects directly when the admin's own NAT is endpoint-independent, so the relay is
-for both-ends-symmetric and UDP-blocked networks. The browser receives both UDP and TCP TURN URLs,
-but the node deliberately keeps only UDP. The packaged `node-datachannel` uses libjuice: although
-its binding exposes `TurnTcp`/`TurnTls` enum values, TURN control over TCP/TLS requires a libnice
-build. Thus a UDP-blocked browser can use TURN/TCP, while a UDP-blocked node remains on Socket.IO.
+for both-ends-symmetric and UDP-blocked networks. The browser receives the UDP and TCP TURN URLs
+(and the `turns` one when `TURN_TLS_PORT` is set), but the node deliberately keeps only UDP. The
+packaged `node-datachannel` uses libjuice: although its binding exposes `TurnTcp`/`TurnTls` enum
+values, TURN control over TCP/TLS requires a libnice build. Thus a UDP-blocked browser can use
+TURN/TCP, while a UDP-blocked node remains on Socket.IO.
 
-HTML and static assets stay on the HTTP/Socket.IO bootstrap path because they are needed before a
-data channel can exist. Asset chunks are binary Socket.IO attachments, streamed one at a time with
-an acknowledgement and HTTP response backpressure; they are never JSON-stringified into WebRTC
-control frames. The data channel carries the smaller namespace control/event protocol.
+The document and its boot bundle stay on the HTTP/Socket.IO path because they are needed before a
+data channel can exist. Everything the page requests afterwards — lazy chunks, images, fonts — is
+routed over the data channel instead: a service worker on the fleet origin intercepts
+`/nodes/{id}/*` asset requests, hands them to the requesting page, and the page streams them from
+the node over a second `assets` channel. The fleet path stays the fallback, taken whenever there is
+no live transport or anything fails, so the worker can only ever add a route, never remove one.
+Asset frames are binary (a tag, a request id and raw bytes) on their own channel, so a large chunk
+never head-of-line-blocks the control/event protocol, and a cancelled request aborts the node-side
+stream rather than paying for the rest of it. Because the worker answers these requests itself the
+browser HTTP cache no longer serves them; each load re-pulls over the data channel, which costs the
+fleet nothing but is not free for the node.
+
 Both data-channel writers use an ordered queue, pause above a 1 MiB native buffer, resume from the
-buffered-amount-low callback, and close the session rather than exceed an 8 MiB aggregate bound.
+buffered-amount-low callback, and close the session rather than exceed an 8 MiB aggregate bound. The
+node paces an asset stream against that queue, so a slow link throttles the read from its own API
+rather than accumulating in memory.
+
+Once connected, the browser pings over the data channel every 15 seconds and both ends drop a
+session that has gone 45 seconds without inbound traffic. ICE consent freshness only proves the path
+is up; this is what catches a peer whose process has wedged with the channel still open, and it
+replaces the engine.io ping/pong the Socket.IO path provided. Both ends advertise `heartbeat` in
+their HELLO and arm the watchdog only if the other side did, so a mixed-version pair stays quiet and
+keeps working. A transport with no open namespace is closed after 30 seconds, late enough that
+moving between node pages reuses the peer connection instead of renegotiating one.
 
 `coturn` runs as its own container in the compose stack — not inside the fleet image (a crash there
 would take the app down and relay bandwidth would contend with the signaling loop). It uses
@@ -102,6 +122,36 @@ on the advertised TURN URLs is a separate thing — it picks the peer's own leg 
 fleet advertises both so a client on a network that blocks UDP can still reach `3477/tcp` and get
 a UDP relay allocation behind it.
 
+**Reaching the relay from a locked-down network.** `3477/tcp` and `3477/udp` are both blocked on
+networks that permit nothing but 443, which leaves such a browser with no relay at all. Setting
+`TURN_TLS_PORT=443` makes fleet advertise a third URL, `turns:relay.${DOMAIN}:443?transport=tcp`,
+alongside the two on 3477. coturn keeps `--no-tls` and grows no listener: Traefik already owns 443,
+so it terminates the TLS and proxies the plaintext TURN/TCP stream to coturn's existing `3477/tcp`.
+TURN-over-TLS is TURN-over-TCP inside TLS, so coturn needs no certificate of its own and the relay
+allocation behind it is still UDP.
+
+Add a TCP router on the existing https entrypoint. A TCP router with a specific `HostSNI` wins over
+the HTTP routers sharing the entrypoint, so `fleet.${DOMAIN}` is unaffected:
+```
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.turns.rule=HostSNI(`relay.${DOMAIN}`)"
+      - "traefik.tcp.routers.turns.entrypoints=https"
+      - "traefik.tcp.routers.turns.tls.certresolver=${CERTRESOLVER:+${CERTRESOLVER}}"
+      - "traefik.tcp.services.turns.loadbalancer.server.address=${TURN_INTERNAL_IP}:${TURN_LISTENING_PORT:-3477}"
+```
+`relay.${DOMAIN}` already resolves to this host for the UDP/TCP URLs, so no new DNS record is needed
+— but it must now also be covered by the certificate, since the browser validates SNI before any
+TURN message is sent.
+
+Leave `TURN_TLS_PORT` unset until that router is in place. An advertised TURN URL that nothing
+answers is not free: the browser gathers against it and waits for it to time out before ICE
+completes, so a dead `turns` URL slows down every session it is offered to.
+
+Because Traefik terminates, coturn sees these clients with Traefik's address rather than their own.
+Nothing here is keyed on client IP — authentication is the HMAC credential and `--denied-peer-ip`
+filters the *peer* (relay target) address, not the client — but a future per-client-IP limit would
+lump every TLS client together.
+
 The relay is reachable by any signed-in fleet user (they read a 300s credential out of their
 session ack), so `--denied-peer-ip` blocks the RFC1918 ranges **and loopback** — nodes are relayed
 to on public addresses, so this costs nothing and keeps the relay from being an open path into the
@@ -127,6 +177,7 @@ TURN_SECRET_KEY      shared static-auth-secret (also set on the fleet service)
 TURN_INTERNAL_IP     the host's LAN address; the only interface coturn binds and relays on
 TURN_EXTERNAL_IP     the host's public IP, advertised in relay candidates
 TURN_LISTENING_PORT  STUN/TURN over UDP and TCP (default 3477)
+TURN_TLS_PORT        advertise turns:// on this port (unset = off; see the Traefik router above)
 TURN_MIN_PORT        first UDP relay port (default 61000)
 TURN_MAX_PORT        last UDP relay port (default 61500)
 TURN_REALM           defaults to ${DOMAIN}
@@ -163,6 +214,7 @@ services:
       - MFA_SECRET_KEY=${MFA_SECRET_KEY}
       - TURN_SECRET_KEY=${TURN_SECRET_KEY}
       - TURN_LISTENING_PORT=${TURN_LISTENING_PORT:-3477}
+      - TURN_TLS_PORT=${TURN_TLS_PORT:-}
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_SECURE=${SMTP_SECURE:-false}
