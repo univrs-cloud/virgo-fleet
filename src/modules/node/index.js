@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { registerFleetProxy, disconnectNodeClients } from '../../utils/node_proxy.js';
 import { registerNodeSocketGetter, attachNodeAssetHandler, failPendingRequestsForNode } from '../../utils/node_assets.js';
+import { registerWebrtcSignaling, attachNodeWebrtcSignaling, closeNodeWebrtcSessions } from '../../utils/webrtc_signal.js';
 import { authenticateSocketUser } from '../../utils/socket_auth.js';
 import eventEmitter from '../../utils/event_emitter.js';
 import { emitNodes } from './proxy.js';
@@ -30,9 +31,15 @@ class NodeModule {
 	#peersByNodeId = new Map();
 	#machineIdByNodeId = new Map();
 	#nodeIdByMachineId = new Map();
+	#capabilitiesByNodeId = new Map();
 
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
+		// Registered before registerFleetProxy so the `/fleet/{id}/signal` namespace is matched by
+		// the signaling handler and not swallowed by the generic proxy matcher.
+		registerWebrtcSignaling(socket.getIO(), (nodeId) => {
+			return this.#nodeSocketsByNodeId.get(nodeId);
+		});
 		registerFleetProxy(socket.getIO(), (nodeId) => {
 			return this.#nodeSocketsByNodeId.get(nodeId);
 		});
@@ -74,6 +81,7 @@ class NodeModule {
 	setNodeSocket(nodeId, socket) {
 		this.#nodeSocketsByNodeId.set(nodeId, socket);
 		attachNodeAssetHandler(socket);
+		attachNodeWebrtcSignaling(socket);
 	}
 
 	getNodeSocket(nodeId) {
@@ -110,6 +118,13 @@ class NodeModule {
 
 	getNodePeers(nodeId) {
 		return this.#peersByNodeId.get(nodeId) ?? [];
+	}
+
+	/** What a node's build supports, as reported once on connect. A node that predates this event
+	 * (or whose optional native deps failed to load) reports nothing, which reads as everything
+	 * off — it stays on the Socket.IO proxy, no version floor. */
+	getNodeCapabilities(nodeId) {
+		return this.#capabilitiesByNodeId.get(nodeId) ?? {};
 	}
 
 	getNodeIdForMachineId(machineId) {
@@ -241,6 +256,12 @@ class NodeModule {
 						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
 						.catch((error) => { console.error('Error broadcasting node peers:', error); });
 				});
+				socket.on('node:capabilities', (capabilities = {}) => {
+					this.#capabilitiesByNodeId.set(socket.data.nodeId, { webrtc: Boolean(capabilities.webrtc) });
+					DataService.listNodeMemberUserIds(socket.data.nodeId)
+						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
+						.catch((error) => { console.error('Error broadcasting node capabilities:', error); });
+				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
 				emitNodes(socket, this).catch((error) => {
@@ -254,7 +275,12 @@ class NodeModule {
 			});
 			socket.on('disconnect', () => {
 				const nodeId = socket.data?.nodeId;
-				if (nodeId && this.#nodeSocketsByNodeId.get(nodeId) === socket) {
+				if (!nodeId) {
+					return;
+				}
+				// Every WebRTC session on this socket is dead; tell the browsers so they fall back.
+				closeNodeWebrtcSessions(nodeId, socket);
+				if (this.#nodeSocketsByNodeId.get(nodeId) === socket) {
 					this.#nodeSocketsByNodeId.delete(nodeId);
 					this.#updatesByNodeId.delete(nodeId);
 					this.#updateByNodeId.delete(nodeId);
@@ -267,6 +293,7 @@ class NodeModule {
 						this.#nodeIdByMachineId.delete(machineId);
 					}
 					this.#machineIdByNodeId.delete(nodeId);
+					this.#capabilitiesByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.

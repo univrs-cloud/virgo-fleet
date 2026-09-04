@@ -158,6 +158,9 @@ const emitNodes = async (socket, module) => {
 			const entry = {
 				...node,
 				online,
+				// Whether the browser should reach this node over a WebRTC data channel rather than
+				// the Socket.IO proxy. Only true while the node is online and advertising support.
+				webrtc: online && Boolean(module.getNodeCapabilities(node.nodeId).webrtc),
 				updates: module.getNodeUpdates(node.nodeId),
 				update: module.getNodeUpdate(node.nodeId),
 				appUpdateJobs: module.getNodeAppUpdateJobs(node.nodeId),

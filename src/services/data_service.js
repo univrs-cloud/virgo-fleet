@@ -1064,6 +1064,18 @@ class DataService {
 		return node?.name || null;
 	}
 
+	/** A node's registration token — the secret shared only between that node and fleet. Used to
+	 * sign the short-lived bearer a browser presents to the node when opening a WebRTC data
+	 * channel; never sent to a browser itself. */
+	static async getNodeToken(nodeId) {
+		const normalizedNodeId = String(nodeId || '').trim();
+		if (!normalizedNodeId) {
+			return null;
+		}
+		const node = await Node.findOne({ where: { nodeId: normalizedNodeId }, attributes: ['token'] });
+		return node?.token || null;
+	}
+
 	/** Signature of the update set the node's members were last notified about (empty string when the
 	 * node last reported no updates, null when never recorded). Persisted so reconnect re-reports and
 	 * process restarts don't re-notify. */

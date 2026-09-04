@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { authenticateSocketUser } from './socket_auth.js';
+import { closeNodeWebrtcSessionsForUser } from './webrtc_signal.js';
 import DataService from '../services/data_service.js';
 
 const clientsByNodeId = new Map();
@@ -136,7 +137,9 @@ function disconnectNodeClients(nodeId) {
 }
 
 /** Drops a single user's live proxy sessions for a node (e.g. after their access is revoked),
- * so an already-bridged session is torn down immediately instead of surviving until reconnect. */
+ * so an already-bridged session is torn down immediately instead of surviving until reconnect.
+ * Their WebRTC data channel to the node (which the node only access-checks at open time) is torn
+ * down on the same terms. */
 function disconnectNodeUser(nodeId, userId) {
 	if (!userId) {
 		return;
@@ -146,6 +149,7 @@ function disconnectNodeUser(nodeId, userId) {
 			clientSocket.disconnect(true);
 		}
 	}
+	closeNodeWebrtcSessionsForUser(nodeId, userId);
 }
 
 /** Enforces access after a group membership/share change (removal, group deletion). For each of the
