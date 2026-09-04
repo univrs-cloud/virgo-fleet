@@ -39,6 +39,8 @@ class NodeModule {
 		// the signaling handler and not swallowed by the generic proxy matcher.
 		registerWebrtcSignaling(socket.getIO(), (nodeId) => {
 			return this.#nodeSocketsByNodeId.get(nodeId);
+		}, (nodeId) => {
+			return this.getNodeCapabilities(nodeId);
 		});
 		registerFleetProxy(socket.getIO(), (nodeId) => {
 			return this.#nodeSocketsByNodeId.get(nodeId);

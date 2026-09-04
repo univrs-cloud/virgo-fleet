@@ -34,6 +34,10 @@ let getNodeSocket = () => {
 	return null;
 };
 
+let getNodeCapabilities = () => {
+	return {};
+};
+
 const registerNodeSocketGetter = (getter) => {
 	getNodeSocket = getter;
 };
@@ -133,6 +137,10 @@ const handleSessionRequest = async (clientSocket, nodeId, ack) => {
 		ack({ status: 'failed', message: 'Node is offline.' });
 		return;
 	}
+	if (!getNodeCapabilities(nodeId)?.webrtc) {
+		ack({ status: 'failed', message: 'Node does not support WebRTC.' });
+		return;
+	}
 	const [allowed, nodeToken] = await Promise.all([
 		DataService.canUserAccessNode(clientSocket.userId, nodeId),
 		DataService.getNodeToken(nodeId)
@@ -178,8 +186,11 @@ const handleSessionRequest = async (clientSocket, nodeId, ack) => {
 
 /** Registers the `/fleet/{nodeId}/signal` namespace. Must run before registerFleetProxy so the
  * `/signal` suffix is matched here and not swallowed by the generic proxy matcher. */
-const registerWebrtcSignaling = (io, nodeSocketGetter) => {
+const registerWebrtcSignaling = (io, nodeSocketGetter, capabilitiesGetter) => {
 	registerNodeSocketGetter(nodeSocketGetter);
+	if (capabilitiesGetter) {
+		getNodeCapabilities = capabilitiesGetter;
+	}
 
 	const signalNsp = io.of(SIGNAL_NAMESPACE_PATTERN);
 

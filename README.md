@@ -40,6 +40,17 @@ relay, which is what the `coturn` sidecar below provides. Fleet stays the automa
 that doesn't advertise support, a browser without WebRTC, or a data channel that fails to establish
 all transparently keep using the Socket.IO proxy.
 
+The page always opens the Socket.IO proxy first and *upgrades* to the data channel once it is up, so
+a node that can never establish one costs nothing visible — no stall, no retry storm. A node that
+does not advertise the capability is refused at `webrtc:session:request` rather than left to time
+out, and a failed attempt puts that node on a one-minute cooldown for the page.
+
+The relay only carries sessions where **neither** peer can be reached directly. A node behind CGNAT
+usually still connects directly when the admin's own NAT is endpoint-independent, so the relay is
+for both-ends-symmetric and UDP-blocked networks. Note the node half is **UDP-relay only** —
+`node-datachannel` is built against libjuice, which has no TURN-over-TCP — so the `?transport=tcp`
+URL fleet advertises helps browsers on UDP-blocked networks but never nodes.
+
 `coturn` runs as its own container in the compose stack — not inside the fleet image (a crash there
 would take the app down and relay bandwidth would contend with the signaling loop). It uses
 `use-auth-secret`: fleet derives a short-lived credential from `TURN_SECRET_KEY` per session, so nothing
