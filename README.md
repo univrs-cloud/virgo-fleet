@@ -44,10 +44,16 @@ all transparently keep using the Socket.IO proxy.
 would take the app down and relay bandwidth would contend with the signaling loop). It uses
 `use-auth-secret`: fleet derives a short-lived credential from `TURN_SECRET_KEY` per session, so nothing
 is stored. Fleet advertises the relay at `relay.${DOMAIN}` — point a DNS **A record** for that name
-at `TURN_EXTERNAL_IP`. When the host sits behind a router rather than holding its public address
-directly, set `TURN_INTERNAL_IP` to its LAN address as well: coturn is then told the mapping
-explicitly instead of guessing which of its interfaces the public IP belongs to, which on host
-networking includes every docker bridge.
+at `TURN_EXTERNAL_IP`. Set `TURN_INTERNAL_IP` to the host's LAN address: on host networking coturn
+would otherwise bind and allocate relays on every docker bridge and every alias, handing browsers a
+pile of unreachable private candidates to time out on, so `--listening-ip`/`--relay-ip` pin it to
+the one interface the router forwards to. `--external-ip` then advertises every relay as the public
+address.
+
+Deliberately *not* the two-part `--external-ip=public/private` form: coturn adds the private half to
+its allowed-peer list (`Whitelisting external-ip private part` in the log), which cancels the
+`--denied-peer-ip` entry covering the host's own LAN and turns the relay into a path to every
+service on it. Pinning gives the same precision without that.
 
 Like `nextcloud-hpb`'s `aio-talk`, Traefik isn't involved and there is no TLS (no certificate).
 coturn runs on **host networking** rather than publishing ports: a TURN relay binds a fresh UDP
@@ -85,7 +91,7 @@ ss -lunp | grep -E ':3478|:3477'
 **Environment.**
 ```
 TURN_SECRET_KEY      shared static-auth-secret (also set on the fleet service)
-TURN_INTERNAL_IP     the host's LAN address, when it is behind a router
+TURN_INTERNAL_IP     the host's LAN address; the only interface coturn binds and relays on
 TURN_EXTERNAL_IP     the host's public IP, advertised in relay candidates
 TURN_LISTENING_PORT  STUN/TURN over UDP and TCP (default 3477)
 TURN_MIN_PORT        first UDP relay port (default 61000)
@@ -180,22 +186,23 @@ services:
   # Relays the browser <-> node WebRTC data channel for nodes that can't be reached directly (CGNAT).
   # Mirrors nextcloud-hpb's aio-talk: no Traefik, no TLS, and a control port of 3477 (which also
   # clears aio-talk's 3478). Host networking because relay allocations are UDP (the only kind
-  # browsers ask for) and a published range costs a docker-proxy process per port;
-  # --denied-peer-ip keeps the relay off the docker networks and the host LAN.
+  # browsers ask for) and a published range costs a docker-proxy process per port; --listening-ip
+  # and --relay-ip pin it to the forwarded interface, and --denied-peer-ip keeps the relay off the
+  # docker networks and the host LAN.
   coturn:
     image: coturn/coturn:latest
     network_mode: host
     command:
-      - -n
       - --realm=${TURN_REALM:-${DOMAIN}}
       - --use-auth-secret
       - --static-auth-secret=${TURN_SECRET_KEY}
+      - --listening-ip=${TURN_INTERNAL_IP}
+      - --relay-ip=${TURN_INTERNAL_IP}
       - --listening-port=${TURN_LISTENING_PORT:-3477}
       - --min-port=${TURN_MIN_PORT:-61000}
       - --max-port=${TURN_MAX_PORT:-61500}
       - --total-quota=400
       - --no-tls
-      - --no-dtls
       - --no-multicast-peers
       - --denied-peer-ip=0.0.0.0-0.255.255.255
       - --denied-peer-ip=10.0.0.0-10.255.255.255
@@ -204,10 +211,11 @@ services:
       - --denied-peer-ip=172.16.0.0-172.31.255.255
       - --denied-peer-ip=192.168.0.0-192.168.255.255
       - --denied-peer-ip=224.0.0.0-255.255.255.255
-      - --external-ip=${TURN_EXTERNAL_IP}${TURN_INTERNAL_IP:+/${TURN_INTERNAL_IP}}
-      - --no-cli
+      - --external-ip=${TURN_EXTERNAL_IP}
       - --no-software-attribute
       - --log-file=stdout
+    volumes:
+      - /messier/apps/fleet/coturn:/var/lib/coturn
     restart: unless-stopped
 
 networks:
