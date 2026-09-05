@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { registerFleetProxy, disconnectNodeClients } from '../../utils/node_proxy.js';
-import { registerNodeSocketGetter, attachNodeAssetHandler, failPendingRequestsForNode } from '../../utils/node_assets.js';
+import { attachNodeAssetHandler, failPendingRequestsForNode } from '../../utils/node_assets.js';
+import { registerNodeRegistry } from '../../utils/node_registry.js';
 import { registerWebrtcSignaling, attachNodeWebrtcSignaling, closeNodeWebrtcSessions } from '../../utils/webrtc_signal.js';
 import { authenticateSocketUser } from '../../utils/socket_auth.js';
 import eventEmitter from '../../utils/event_emitter.js';
@@ -37,17 +38,12 @@ class NodeModule {
 		this.#nsp = socket.getIO().of('/node');
 		// Registered before registerFleetProxy so the `/fleet/{id}/signal` namespace is matched by
 		// the signaling handler and not swallowed by the generic proxy matcher.
-		registerWebrtcSignaling(socket.getIO(), (nodeId) => {
-			return this.#nodeSocketsByNodeId.get(nodeId);
-		}, (nodeId) => {
-			return this.getNodeCapabilities(nodeId);
+		registerNodeRegistry({
+			getNodeSocket: (nodeId) => { return this.getNodeSocket(nodeId); },
+			getNodeCapabilities: (nodeId) => { return this.getNodeCapabilities(nodeId); }
 		});
-		registerFleetProxy(socket.getIO(), (nodeId) => {
-			return this.#nodeSocketsByNodeId.get(nodeId);
-		});
-		registerNodeSocketGetter((nodeId) => {
-			return this.#nodeSocketsByNodeId.get(nodeId);
-		});
+		registerWebrtcSignaling(socket.getIO());
+		registerFleetProxy(socket.getIO());
 		this.#setupMiddleware();
 		this.#setupConnectionHandlers();
 		// A deleted user's owned nodes are cascade-removed from the DB; notify those nodes (captured

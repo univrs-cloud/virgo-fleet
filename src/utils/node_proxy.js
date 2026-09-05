@@ -1,20 +1,12 @@
 import { randomUUID } from 'crypto';
-import { authenticateSocketUser } from './socket_auth.js';
+import { parseFleetNamespace, fleetNamespaceMiddleware } from './fleet_namespace.js';
 import { closeNodeWebrtcSessionsForUser } from './webrtc_signal.js';
+import { getNodeSocket } from './node_registry.js';
 import DataService from '../services/data_service.js';
 
-const clientsByNodeId = new Map();
+const CALL_TIMEOUT_MS = 60 * 1000;
 
-function parseFleetNamespace(name) {
-	const parts = name.split('/');
-	if (parts.length < 4 || parts[1] !== 'fleet') {
-		return null;
-	}
-	return {
-		nodeId: parts[2],
-		targetNamespace: `/${parts.slice(3).join('/')}`
-	};
-}
+const clientsByNodeId = new Map();
 
 function trackClient(nodeId, clientSocket) {
 	if (!clientsByNodeId.has(nodeId)) {
@@ -36,11 +28,23 @@ function ensureNodeDispatcher(nodeSocket) {
 	}
 
 	const sessions = new Map();
+	const calls = new Map();
 	nodeSocket.data.proxySessions = sessions;
+	nodeSocket.data.proxyCalls = calls;
 
 	nodeSocket.on('proxy:event', ({ sessionId, event, args } = {}) => {
 		const clientSocket = sessions.get(sessionId);
 		clientSocket?.emit(event, ...(Array.isArray(args) ? args : []));
+	});
+
+	nodeSocket.on('proxy:reply', ({ sessionId, callId, result, error } = {}) => {
+		const call = calls.get(callId);
+		if (!call || call.sessionId !== sessionId) {
+			return;
+		}
+		calls.delete(callId);
+		clearTimeout(call.timer);
+		call.ack(error ? { status: 'failed', message: error.message || 'Request failed' } : result);
 	});
 
 	nodeSocket.on('proxy:close', ({ sessionId } = {}) => {
@@ -54,8 +58,22 @@ function ensureNodeDispatcher(nodeSocket) {
 	return sessions;
 }
 
+function dropSessionCalls(nodeSocket, sessionId) {
+	const calls = nodeSocket.data.proxyCalls;
+	if (!calls) {
+		return;
+	}
+	for (const [callId, call] of calls) {
+		if (call.sessionId === sessionId) {
+			clearTimeout(call.timer);
+			calls.delete(callId);
+		}
+	}
+}
+
 function bridgeClient(clientSocket, nodeSocket, nodeId, targetNamespace) {
 	const sessions = ensureNodeDispatcher(nodeSocket);
+	const calls = nodeSocket.data.proxyCalls;
 	const sessionId = randomUUID();
 
 	sessions.set(sessionId, clientSocket);
@@ -68,13 +86,27 @@ function bridgeClient(clientSocket, nodeSocket, nodeId, targetNamespace) {
 	nodeSocket.emit('proxy:open', { sessionId, namespace: targetNamespace, user });
 
 	clientSocket.onAny((event, ...args) => {
-		if (nodeSocket.connected) {
-			nodeSocket.emit('proxy:event', { sessionId, event, args });
+		if (!nodeSocket.connected) {
+			return;
 		}
+		const ack = (typeof args[args.length - 1] === 'function') ? args.pop() : null;
+		if (!ack) {
+			nodeSocket.emit('proxy:event', { sessionId, event, args });
+			return;
+		}
+		const callId = randomUUID();
+		const timer = setTimeout(() => {
+			calls.delete(callId);
+			ack({ status: 'failed', message: 'operation has timed out' });
+		}, CALL_TIMEOUT_MS);
+		timer.unref?.();
+		calls.set(callId, { sessionId, ack, timer });
+		nodeSocket.emit('proxy:call', { sessionId, callId, event, args });
 	});
 
 	clientSocket.on('disconnect', () => {
 		sessions.delete(sessionId);
+		dropSessionCalls(nodeSocket, sessionId);
 		untrackClient(nodeId, clientSocket);
 		if (nodeSocket.connected) {
 			nodeSocket.emit('proxy:close', { sessionId });
@@ -84,31 +116,10 @@ function bridgeClient(clientSocket, nodeSocket, nodeId, targetNamespace) {
 
 /** Registers fleet node proxy namespaces on the main Socket.IO server. Clients connect to
  * `/fleet/{nodeId}/{module}` on path `/api` instead of separate Server instances per node. */
-function registerFleetProxy(io, getNodeSocket) {
+function registerFleetProxy(io) {
 	const fleetNsp = io.of(/^\/fleet\/[^/]+\/.+$/);
 
-	fleetNsp.use(async (socket, next) => {
-		const parsed = parseFleetNamespace(socket.nsp.name);
-		if (!parsed) {
-			next(new Error('Invalid fleet namespace'));
-			return;
-		}
-		try {
-			await authenticateSocketUser(socket);
-			if (!socket.isAuthenticated) {
-				next(new Error('Authentication required'));
-				return;
-			}
-			const allowed = await DataService.canUserAccessNode(socket.userId, parsed.nodeId);
-			if (!allowed) {
-				next(new Error('Access denied for node'));
-				return;
-			}
-			next();
-		} catch (error) {
-			next(error);
-		}
-	});
+	fleetNsp.use(fleetNamespaceMiddleware);
 
 	fleetNsp.on('connection', (clientSocket) => {
 		const parsed = parseFleetNamespace(clientSocket.nsp.name);
@@ -117,7 +128,7 @@ function registerFleetProxy(io, getNodeSocket) {
 			return;
 		}
 		const nodeSocket = getNodeSocket(parsed.nodeId);
-		if (!nodeSocket) {
+		if (!nodeSocket?.connected) {
 			clientSocket.disconnect(true);
 			return;
 		}

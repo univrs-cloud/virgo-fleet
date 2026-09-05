@@ -1,8 +1,9 @@
 import { randomUUID } from 'crypto';
-import { authenticateSocketUser } from './socket_auth.js';
+import { fleetNamespaceMiddleware } from './fleet_namespace.js';
 import { createRateLimiter, getSocketClientAddress } from './socket_rate_limit.js';
 import { iceServers } from './turn.js';
 import { mintNodeSessionToken } from './node_authz_token.js';
+import { getNodeSocket, getNodeCapabilities } from './node_registry.js';
 import DataService from '../services/data_service.js';
 
 // Signaling for the browser <-> node WebRTC data channel that carries a node page's namespace
@@ -21,6 +22,7 @@ const SIGNAL_NAMESPACE_PATTERN = /^\/fleet\/[^/]+\/signal$/;
 const MAX_SESSIONS_PER_SOCKET = 4;
 const SESSION_REQUEST_WINDOW_MS = 60 * 1000;
 const NEGOTIATION_TIMEOUT_MS = 30 * 1000;
+const NODE_OFFLINE_GRACE_MS = 60 * 1000;
 
 const SESSION_STATE = Object.freeze({
 	REQUESTED: 'REQUESTED',
@@ -47,32 +49,14 @@ const transitionSession = (session, nextState) => {
 
 const sessionRequestLimiter = createRateLimiter({ windowMs: SESSION_REQUEST_WINDOW_MS, max: 60 });
 
-// sessionId -> { clientSocket, nodeSocket, nodeId, userId, state, negotiationTimer }
+// sessionId -> { clientSocket, nodeSocket, nodeId, userId, state, negotiationTimer, orphanTimer }
 const sessions = new Map();
 // nodeId -> Set<sessionId>, userId -> Set<sessionId>: reverse indexes for the teardown hooks.
 const sessionsByNodeId = new Map();
 const sessionsByUserId = new Map();
 const signalSocketsByNodeId = new Map();
-
-let getNodeSocket = () => {
-	return null;
-};
-
-let getNodeCapabilities = () => {
-	return {};
-};
-
-const registerNodeSocketGetter = (getter) => {
-	getNodeSocket = getter;
-};
-
-const parseSignalNamespace = (name) => {
-	const parts = name.split('/');
-	if (parts.length !== 4 || parts[1] !== 'fleet' || parts[3] !== 'signal') {
-		return null;
-	}
-	return { nodeId: parts[2] };
-};
+const pendingResumes = new Map();
+const sessionsByClient = new Map();
 
 const indexAdd = (map, key, value) => {
 	if (key === null || key === undefined) {
@@ -104,26 +88,130 @@ const forgetSession = (sessionId) => {
 	}
 	transitionSession(session, SESSION_STATE.CLOSING);
 	clearTimeout(session.negotiationTimer);
+	clearTimeout(session.orphanTimer);
 	session.negotiationTimer = null;
+	session.orphanTimer = null;
 	sessions.delete(sessionId);
 	indexRemove(sessionsByNodeId, session.nodeId, sessionId);
 	indexRemove(sessionsByUserId, session.userId, sessionId);
+	indexRemove(sessionsByClient, session.clientSocket, sessionId);
 	transitionSession(session, SESSION_STATE.CLOSED);
 };
 
 const countSessionsForClient = (clientSocket) => {
-	let count = 0;
-	for (const session of sessions.values()) {
-		if (session.clientSocket === clientSocket) {
-			count += 1;
-		}
-	}
-	return count;
+	return sessionsByClient.get(clientSocket)?.size ?? 0;
+};
+
+const reassignSessionClient = (session, sessionId, clientSocket) => {
+	indexRemove(sessionsByClient, session.clientSocket, sessionId);
+	session.clientSocket = clientSocket;
+	indexAdd(sessionsByClient, clientSocket, sessionId);
 };
 
 const tellSessionNode = (session, event, payload) => {
-	if (session?.nodeSocket?.connected) {
-		session.nodeSocket.emit(event, payload);
+	if (!session) {
+		return;
+	}
+	const nodeSocket = session.nodeSocket?.connected ? session.nodeSocket : getNodeSocket(session.nodeId);
+	if (nodeSocket?.connected) {
+		nodeSocket.emit(event, payload);
+	}
+};
+
+const closeSession = (sessionId, { reason, tellNode = true } = {}) => {
+	const session = sessions.get(sessionId);
+	if (!session) {
+		return;
+	}
+	if (tellNode) {
+		tellSessionNode(session, 'webrtc:close', { sessionId });
+	}
+	session.clientSocket.emit('webrtc:close', { sessionId, ...(reason ? { reason } : {}) });
+	forgetSession(sessionId);
+};
+
+const refreshOrphanState = (session, sessionId) => {
+	const nodeOnline = Boolean(session.nodeSocket?.connected || getNodeSocket(session.nodeId)?.connected);
+	const clientOnline = Boolean(session.clientSocket?.connected);
+	if (nodeOnline && clientOnline) {
+		clearTimeout(session.orphanTimer);
+		session.orphanTimer = null;
+		return;
+	}
+	if (session.orphanTimer) {
+		return;
+	}
+	session.orphanTimer = setTimeout(() => {
+		session.orphanTimer = null;
+		closeSession(sessionId, { reason: 'node-offline' });
+	}, NODE_OFFLINE_GRACE_MS);
+	session.orphanTimer.unref?.();
+};
+
+const adoptSession = ({ sessionId, nodeId, nodeSocket, clientSocket }) => {
+	const session = {
+		clientSocket,
+		nodeSocket,
+		nodeId,
+		userId: clientSocket.userId,
+		state: SESSION_STATE.CONNECTED,
+		stateChangedAt: Date.now(),
+		negotiationTimer: null,
+		orphanTimer: null
+	};
+	sessions.set(sessionId, session);
+	indexAdd(sessionsByNodeId, nodeId, sessionId);
+	indexAdd(sessionsByUserId, session.userId, sessionId);
+	indexAdd(sessionsByClient, clientSocket, sessionId);
+	recheckSessionAccess(sessionId).catch((error) => {
+		console.error('Error re-checking WebRTC session access:', error);
+	});
+};
+
+const dropPendingResume = (sessionId) => {
+	const pending = pendingResumes.get(sessionId);
+	if (!pending) {
+		return;
+	}
+	clearTimeout(pending.timer);
+	pendingResumes.delete(sessionId);
+};
+
+const offerResume = (sessionId, nodeId, half) => {
+	let pending = pendingResumes.get(sessionId);
+	if (pending && pending.nodeId !== nodeId) {
+		dropPendingResume(sessionId);
+		pending = null;
+	}
+	if (!pending) {
+		pending = { nodeId, nodeSocket: null, clientSocket: null, timer: null };
+		pending.timer = setTimeout(() => {
+			pendingResumes.delete(sessionId);
+			if (pending.nodeSocket?.connected) {
+				pending.nodeSocket.emit('webrtc:close', { sessionId });
+			}
+			pending.clientSocket?.emit('webrtc:close', { sessionId, reason: 'node-offline' });
+		}, NODE_OFFLINE_GRACE_MS);
+		pending.timer.unref?.();
+		pendingResumes.set(sessionId, pending);
+	}
+	Object.assign(pending, half);
+	if (!pending.nodeSocket || !pending.clientSocket) {
+		return false;
+	}
+	dropPendingResume(sessionId);
+	adoptSession({ sessionId, nodeId, nodeSocket: pending.nodeSocket, clientSocket: pending.clientSocket });
+	return true;
+};
+
+const recheckSessionAccess = async (sessionId) => {
+	const session = sessions.get(sessionId);
+	if (!session) {
+		return;
+	}
+	const allowed = await DataService.canUserAccessNode(session.userId, session.nodeId);
+	if (!allowed && sessions.has(sessionId)) {
+		closeSession(sessionId, { reason: 'access-revoked' });
 	}
 };
 
@@ -168,6 +256,32 @@ const attachNodeWebrtcSignaling = (nodeSocket) => {
 		transitionSession(session, SESSION_STATE.CONNECTED);
 		clearTimeout(session.negotiationTimer);
 		session.negotiationTimer = null;
+	});
+	nodeSocket.on('webrtc:sessions', ({ sessionIds } = {}) => {
+		const nodeId = nodeSocket.data.nodeId;
+		const announced = new Set(Array.isArray(sessionIds) ? sessionIds : []);
+		for (const sessionId of announced) {
+			const session = sessions.get(sessionId);
+			if (!session) {
+				offerResume(sessionId, nodeId, { nodeSocket });
+				continue;
+			}
+			if (session.nodeId !== nodeId) {
+				nodeSocket.emit('webrtc:close', { sessionId });
+				continue;
+			}
+			session.nodeSocket = nodeSocket;
+			refreshOrphanState(session, sessionId);
+			recheckSessionAccess(sessionId).catch((error) => {
+				console.error('Error re-checking WebRTC session access:', error);
+			});
+		}
+		for (const sessionId of [...(sessionsByNodeId.get(nodeId) ?? [])]) {
+			const session = sessions.get(sessionId);
+			if (session?.state === SESSION_STATE.CONNECTED && !announced.has(sessionId)) {
+				closeSession(sessionId, { reason: 'node-offline', tellNode: false });
+			}
+		}
 	});
 };
 
@@ -226,11 +340,13 @@ const handleSessionRequest = async (clientSocket, nodeId, ack) => {
 		userId: clientSocket.userId,
 		state: SESSION_STATE.REQUESTED,
 		stateChangedAt: Date.now(),
-		negotiationTimer: null
+		negotiationTimer: null,
+		orphanTimer: null
 	};
 	sessions.set(sessionId, session);
 	indexAdd(sessionsByNodeId, nodeId, sessionId);
 	indexAdd(sessionsByUserId, clientSocket.userId, sessionId);
+	indexAdd(sessionsByClient, clientSocket, sessionId);
 
 	nodeSocket.emit('webrtc:open', { sessionId, token, iceServers: servers });
 	transitionSession(session, SESSION_STATE.OPEN_SENT);
@@ -239,9 +355,7 @@ const handleSessionRequest = async (clientSocket, nodeId, ack) => {
 		if (!current || current.state === SESSION_STATE.CONNECTED) {
 			return;
 		}
-		tellSessionNode(current, 'webrtc:close', { sessionId });
-		current.clientSocket.emit('webrtc:close', { sessionId, reason: 'negotiation-timeout' });
-		forgetSession(sessionId);
+		closeSession(sessionId, { reason: 'negotiation-timeout' });
 	}, NEGOTIATION_TIMEOUT_MS);
 	session.negotiationTimer.unref?.();
 	ack({ status: 'succeeded', sessionId, iceServers: servers, token });
@@ -249,36 +363,10 @@ const handleSessionRequest = async (clientSocket, nodeId, ack) => {
 
 /** Registers the `/fleet/{nodeId}/signal` namespace. Must run before registerFleetProxy so the
  * `/signal` suffix is matched here and not swallowed by the generic proxy matcher. */
-const registerWebrtcSignaling = (io, nodeSocketGetter, capabilitiesGetter) => {
-	registerNodeSocketGetter(nodeSocketGetter);
-	if (capabilitiesGetter) {
-		getNodeCapabilities = capabilitiesGetter;
-	}
-
+const registerWebrtcSignaling = (io) => {
 	const signalNsp = io.of(SIGNAL_NAMESPACE_PATTERN);
 
-	signalNsp.use(async (socket, next) => {
-		const parsed = parseSignalNamespace(socket.nsp.name);
-		if (!parsed) {
-			next(new Error('Invalid signaling namespace'));
-			return;
-		}
-		try {
-			await authenticateSocketUser(socket);
-			if (!socket.isAuthenticated) {
-				next(new Error('Authentication required'));
-				return;
-			}
-			if (!(await DataService.canUserAccessNode(socket.userId, parsed.nodeId))) {
-				next(new Error('Access denied for node'));
-				return;
-			}
-			socket.data.nodeId = parsed.nodeId;
-			next();
-		} catch (error) {
-			next(error);
-		}
-	});
+	signalNsp.use(fleetNamespaceMiddleware);
 
 	signalNsp.on('connection', (clientSocket) => {
 		const nodeId = clientSocket.data.nodeId;
@@ -324,28 +412,73 @@ const registerWebrtcSignaling = (io, nodeSocketGetter, capabilitiesGetter) => {
 			}
 		});
 
+		clientSocket.on('webrtc:session:resume', (...args) => {
+			const ack = args.find((arg) => { return typeof arg === 'function'; });
+			const sessionId = args.find((arg) => { return arg && typeof arg === 'object'; })?.sessionId;
+			if (typeof sessionId !== 'string' || !sessionId) {
+				ack?.({ status: 'failed', message: 'sessionId is required.' });
+				return;
+			}
+			const session = sessions.get(sessionId);
+			if (session) {
+				if (session.nodeId !== nodeId || session.userId !== clientSocket.userId || session.state !== SESSION_STATE.CONNECTED) {
+					ack?.({ status: 'failed', message: 'Unknown session.' });
+					return;
+				}
+				reassignSessionClient(session, sessionId, clientSocket);
+				refreshOrphanState(session, sessionId);
+				ack?.({ status: 'succeeded' });
+				return;
+			}
+			offerResume(sessionId, nodeId, { clientSocket });
+			ack?.({ status: 'succeeded' });
+		});
+
 		clientSocket.on('disconnect', () => {
 			indexRemove(signalSocketsByNodeId, nodeId, clientSocket);
-			for (const [sessionId, session] of sessions) {
-				if (session.clientSocket === clientSocket) {
+			for (const sessionId of [...(sessionsByClient.get(clientSocket) ?? [])]) {
+				const session = sessions.get(sessionId);
+				if (session.state !== SESSION_STATE.CONNECTED) {
 					tellSessionNode(session, 'webrtc:close', { sessionId });
 					forgetSession(sessionId);
+					continue;
+				}
+				refreshOrphanState(session, sessionId);
+			}
+			for (const [sessionId, pending] of pendingResumes) {
+				if (pending.clientSocket === clientSocket) {
+					pending.clientSocket = null;
+					if (!pending.nodeSocket) {
+						dropPendingResume(sessionId);
+					}
 				}
 			}
 		});
 	});
 };
 
-/** A node socket dropped: every WebRTC session opened on it is dead. Tell each browser so it falls
- * back to the Socket.IO proxy; the node itself is gone so there is nothing to notify. */
+/** A node socket dropped. Sessions still negotiating cannot complete without it, so they end now;
+ * an established data channel is browser <-> node and does not need fleet to stay up, so it is
+ * kept for a grace period in which the node is expected to reconnect and re-announce it. */
 const closeNodeWebrtcSessions = (nodeId, nodeSocket) => {
 	for (const sessionId of [...(sessionsByNodeId.get(nodeId) ?? [])]) {
 		const session = sessions.get(sessionId);
 		if (!session || (nodeSocket && session.nodeSocket !== nodeSocket)) {
 			continue;
 		}
-		session.clientSocket.emit('webrtc:close', { sessionId, reason: 'node-offline' });
-		forgetSession(sessionId);
+		if (session.state !== SESSION_STATE.CONNECTED) {
+			closeSession(sessionId, { reason: 'node-offline', tellNode: false });
+			continue;
+		}
+		refreshOrphanState(session, sessionId);
+	}
+	for (const [sessionId, pending] of pendingResumes) {
+		if (pending.nodeSocket === nodeSocket) {
+			pending.nodeSocket = null;
+			if (!pending.clientSocket) {
+				dropPendingResume(sessionId);
+			}
+		}
 	}
 };
 
@@ -361,9 +494,7 @@ const closeNodeWebrtcSessionsForUser = (nodeId, userId) => {
 		if (session?.nodeId !== nodeId) {
 			continue;
 		}
-		tellSessionNode(session, 'webrtc:close', { sessionId });
-		session.clientSocket.emit('webrtc:close', { sessionId, reason: 'access-revoked' });
-		forgetSession(sessionId);
+		closeSession(sessionId, { reason: 'access-revoked' });
 	}
 	for (const clientSocket of [...(signalSocketsByNodeId.get(nodeId) ?? [])]) {
 		if (clientSocket.userId === userId) {

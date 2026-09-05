@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { getNodeSocket } from './node_registry.js';
 
 const INITIAL_TIMEOUT_MS = 15000;
 const CHUNK_TIMEOUT_MS = 30000;
@@ -10,14 +11,6 @@ const MAX_TRANSFER_MS = 300000;
 const MAX_BUFFERED_ASSET_BYTES = 1 * 1024 * 1024;
 
 const pendingHttpRequests = new Map();
-
-let getNodeSocket = () => {
-	return null;
-};
-
-function registerNodeSocketGetter(getter) {
-	getNodeSocket = getter;
-}
 
 function clearPendingRequest(requestId) {
 	const pending = pendingHttpRequests.get(requestId);
@@ -302,7 +295,6 @@ async function streamNodeAsset(nodeId, assetPath, res, { cacheControl } = {}) {
 }
 
 export {
-	registerNodeSocketGetter,
 	attachNodeAssetHandler,
 	failPendingRequestsForNode,
 	fetchNodeAsset,
