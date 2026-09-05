@@ -179,7 +179,7 @@ function attachNodeAssetHandler(nodeSocket) {
 	nodeSocket.on('proxy:http:error', handleHttpError);
 }
 
-function proxyNodeHttp(nodeId, assetPath, handlers) {
+function proxyNodeHttp(nodeId, assetPath, handlers, { acceptEncoding } = {}) {
 	const nodeSocket = getNodeSocket(nodeId);
 	if (!nodeSocket?.connected) {
 		return Promise.reject(Object.assign(new Error('Node offline'), { status: 503 }));
@@ -209,7 +209,8 @@ function proxyNodeHttp(nodeId, assetPath, handlers) {
 		nodeSocket.emit('proxy:http:request', {
 			requestId,
 			method: 'GET',
-			path: assetPath
+			path: assetPath,
+			acceptEncoding
 		});
 	});
 }
@@ -283,6 +284,10 @@ async function streamNodeAsset(nodeId, assetPath, res, { cacheControl } = {}) {
 			if (headers['content-type']) {
 				res.set('Content-Type', headers['content-type']);
 			}
+			if (headers['content-encoding']) {
+				res.set('Content-Encoding', headers['content-encoding']);
+				res.set('Vary', 'Accept-Encoding');
+			}
 			if (cacheControl) {
 				res.set('Cache-Control', cacheControl);
 			}
@@ -293,7 +298,7 @@ async function streamNodeAsset(nodeId, assetPath, res, { cacheControl } = {}) {
 				res.end();
 			}
 		}
-	});
+	}, { acceptEncoding: 'gzip' });
 }
 
 export {
