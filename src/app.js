@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import helmet from 'helmet';
 import authCookieHandler from './middleware/auth_cookie_handler.js';
 import controllers from './controllers/index.js';
@@ -15,6 +16,11 @@ function createApp() {
 	// the UI compiles lodash templates at runtime via Function(), which CSP's script-src blocks.
 	// The policy the UI does need — frame-ancestors — is written on its own below, since helmet
 	// refuses a CSP that carries no default-src.
+	app.use(compression({
+		filter: (request, response) => {
+			return response.getHeader('Content-Encoding') ? false : compression.filter(request, response);
+		}
+	}));
 	app.use(helmet({ contentSecurityPolicy: false }));
 	app.use(frameAncestorsHandler);
 	app.use(express.json());
