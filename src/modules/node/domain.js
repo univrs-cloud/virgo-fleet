@@ -35,7 +35,7 @@ const onConnection = (socket) => {
 				return;
 			}
 
-			const result = await DomainService.isAvailable(label);
+			const result = await DomainService.isAvailable(label, socket.data?.nodeId);
 			ack({ status: 'succeeded', zone: DomainService.getZone(), ...result });
 		} catch (error) {
 			ack({ status: 'failed', message: error.message });

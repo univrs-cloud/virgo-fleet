@@ -70,7 +70,7 @@ class DomainService {
 		});
 	}
 
-	static async isAvailable(label) {
+	static async isAvailable(label, nodeId) {
 		const normalized = this.normalizeLabel(label);
 		if (!normalized || !LABEL_PATTERN.test(normalized)) {
 			return { available: false, reason: 'invalid' };
@@ -81,7 +81,11 @@ class DomainService {
 		}
 
 		const taken = await NodeDomain.findOne({ where: { fqdn: `${normalized}.${this.getZone()}` } });
-		return taken ? { available: false, reason: 'taken' } : { available: true };
+		if (taken && (!nodeId || taken.nodeId !== nodeId)) {
+			return { available: false, reason: 'taken' };
+		}
+
+		return { available: true };
 	}
 
 	static async claim({ nodeId, hostname, domainName, address, publicIp }) {
