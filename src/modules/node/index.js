@@ -285,12 +285,6 @@ class NodeModule {
 					this.#appUpdateJobsByNodeId.delete(nodeId);
 					this.#storageByNodeId.delete(nodeId);
 					this.#upsByNodeId.delete(nodeId);
-					this.#peersByNodeId.delete(nodeId);
-					const machineId = this.#machineIdByNodeId.get(nodeId);
-					if (machineId) {
-						this.#nodeIdByMachineId.delete(machineId);
-					}
-					this.#machineIdByNodeId.delete(nodeId);
 					this.#capabilitiesByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
