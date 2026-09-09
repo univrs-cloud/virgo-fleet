@@ -42,10 +42,12 @@ const revokeOtherSessions = async (socket) => {
 };
 
 const register = (module) => {
-	module.eventEmitter.on('sessions:updated', (payload) => {
-		broadcastSessions(module, payload?.userId).catch((error) => {
+	module.eventEmitter.on('sessions:updated', async (payload) => {
+		try {
+			await broadcastSessions(module, payload?.userId);
+		} catch (error) {
 			console.error('Error broadcasting sessions:', error);
-		});
+		}
 	});
 };
 

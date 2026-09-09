@@ -62,7 +62,10 @@ class CloudflareService {
 			signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
 		});
 
-		const payload = await response.json().catch(() => { return null; });
+		let payload = null;
+		try {
+			payload = await response.json();
+		} catch { }
 		if (!response.ok || !payload?.success) {
 			const reason = payload?.errors?.map((error) => { return error.message; }).join(', ');
 			throw new Error(`Cloudflare ${method} ${path} failed: ${reason || response.status}`);

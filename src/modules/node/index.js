@@ -48,10 +48,12 @@ class NodeModule {
 		this.#setupConnectionHandlers();
 		// A deleted user's owned nodes are cascade-removed from the DB; notify those nodes (captured
 		// before deletion) to unregister and drop their sockets.
-		eventEmitter.on('nodes:unregister', ({ nodeIds } = {}) => {
-			this.unregisterNodes(nodeIds).catch((error) => {
+		eventEmitter.on('nodes:unregister', async ({ nodeIds } = {}) => {
+			try {
+				await this.unregisterNodes(nodeIds);
+			} catch (error) {
 				console.error('Error unregistering nodes:', error);
-			});
+			}
 		});
 		setImmediate(() => {
 			this.#loadPlugins();
@@ -191,13 +193,14 @@ class NodeModule {
 				this.#handleNodePresence(socket.data.nodeId, true);
 				DomainService.reprobe(socket.data.nodeId, getSocketClientAddress(socket))
 					.catch((error) => { console.error(`[domains] reprobe failed for ${socket.data.nodeId}: ${error.message}`); });
-				socket.on('node:updates', ({ system, apps } = {}) => {
+				socket.on('node:updates', async ({ system, apps } = {}) => {
 					this.#updatesByNodeId.set(socket.data.nodeId, { system, apps });
-					DataService.listNodeMemberUserIds(socket.data.nodeId)
-						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
-						.catch((error) => { console.error('Error broadcasting node updates:', error); });
-					this.#notifyUpdatesAvailable(socket.data.nodeId, { system, apps })
-						.catch((error) => { console.error('Error pushing update notification:', error); });
+					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node updates:');
+					try {
+						await this.#notifyUpdatesAvailable(socket.data.nodeId, { system, apps });
+					} catch (error) {
+						console.error('Error pushing update notification:', error);
+					}
 				});
 				socket.on('node:update', (update) => {
 					const sanitized = this.#sanitizeUpdate(update);
@@ -206,9 +209,7 @@ class NodeModule {
 					} else {
 						this.#updateByNodeId.delete(socket.data.nodeId);
 					}
-					DataService.listNodeMemberUserIds(socket.data.nodeId)
-						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
-						.catch((error) => { console.error('Error broadcasting node update progress:', error); });
+					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node update progress:');
 				});
 				socket.on('node:app:update:job', (job) => {
 					if (!job?.id) {
@@ -217,17 +218,16 @@ class NodeModule {
 
 					const jobs = this.#appUpdateJobsByNodeId.get(socket.data.nodeId) ?? [];
 					this.#appUpdateJobsByNodeId.set(socket.data.nodeId, this.#applyAppUpdateJob(jobs, job));
-					DataService.listNodeMemberUserIds(socket.data.nodeId)
-						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
-						.catch((error) => { console.error('Error broadcasting node app update jobs:', error); });
+					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node app update jobs:');
 				});
-				socket.on('node:storage', (storage) => {
+				socket.on('node:storage', async (storage) => {
 					this.#storageByNodeId.set(socket.data.nodeId, storage);
-					DataService.listNodeMemberUserIds(socket.data.nodeId)
-						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
-						.catch((error) => { console.error('Error broadcasting node storage:', error); });
-					this.#notifyStorageHealth(socket.data.nodeId, storage)
-						.catch((error) => { console.error('Error pushing storage notification:', error); });
+					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node storage:');
+					try {
+						await this.#notifyStorageHealth(socket.data.nodeId, storage);
+					} catch (error) {
+						console.error('Error pushing storage notification:', error);
+					}
 				});
 				socket.on('node:ups', (ups) => {
 					const changed = (this.#upsSignature(this.#upsByNodeId.get(socket.data.nodeId)) !== this.#upsSignature(ups));
@@ -236,9 +236,7 @@ class NodeModule {
 						return;
 					}
 
-					DataService.listNodeMemberUserIds(socket.data.nodeId)
-						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
-						.catch((error) => { console.error('Error broadcasting node ups:', error); });
+					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node ups:');
 				});
 				socket.on('node:peers', ({ selfId, peers } = {}) => {
 					if (selfId) {
@@ -250,15 +248,11 @@ class NodeModule {
 						this.#nodeIdByMachineId.set(selfId, socket.data.nodeId);
 					}
 					this.#peersByNodeId.set(socket.data.nodeId, Array.isArray(peers) ? peers : []);
-					DataService.listNodeMemberUserIds(socket.data.nodeId)
-						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
-						.catch((error) => { console.error('Error broadcasting node peers:', error); });
+					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node peers:');
 				});
 				socket.on('node:capabilities', (capabilities = {}) => {
 					this.#capabilitiesByNodeId.set(socket.data.nodeId, { webrtc: Boolean(capabilities.webrtc) });
-					DataService.listNodeMemberUserIds(socket.data.nodeId)
-						.then((userIds) => { this.eventEmitter.emit('nodes:updated', { userIds }); })
-						.catch((error) => { console.error('Error broadcasting node capabilities:', error); });
+					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node capabilities:');
 				});
 			}
 			if (socket.data?.role === 'user' && socket.isAuthenticated) {
@@ -351,6 +345,15 @@ class NodeModule {
 			} catch (error) {
 				console.error(`[node] Failed to load plugin ${file}:`, error);
 			}
+		}
+	}
+
+	async #broadcastNodesUpdated(nodeId, message) {
+		try {
+			const userIds = await DataService.listNodeMemberUserIds(nodeId);
+			this.eventEmitter.emit('nodes:updated', { userIds });
+		} catch (error) {
+			console.error(message, error);
 		}
 	}
 

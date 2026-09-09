@@ -374,7 +374,7 @@ const registerWebrtcSignaling = (io) => {
 
 		// socket.io delivers a bare ack callback when the client emits with no payload, or
 		// (payload, ack) when it sends one — accept either.
-		clientSocket.on('webrtc:session:request', (...args) => {
+		clientSocket.on('webrtc:session:request', async (...args) => {
 			const ack = args.find((arg) => { return typeof arg === 'function'; });
 			if (!ack) {
 				return;
@@ -383,10 +383,12 @@ const registerWebrtcSignaling = (io) => {
 				ack({ status: 'failed', message: 'Too many requests.' });
 				return;
 			}
-			handleSessionRequest(clientSocket, nodeId, ack).catch((error) => {
+			try {
+				await handleSessionRequest(clientSocket, nodeId, ack);
+			} catch (error) {
 				console.error('Error starting WebRTC session:', error);
 				ack({ status: 'failed', message: 'Could not start session.' });
-			});
+			}
 		});
 
 		clientSocket.on('webrtc:offer', ({ sessionId, sdp, token } = {}) => {

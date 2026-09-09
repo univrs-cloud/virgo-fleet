@@ -98,7 +98,7 @@ function toBuffer(chunk) {
 	return null;
 }
 
-function handleHttpChunk({ requestId, seq } = {}, chunk) {
+async function handleHttpChunk({ requestId, seq } = {}, chunk) {
 	const pending = pendingHttpRequests.get(requestId);
 	const data = toBuffer(chunk);
 	if (!pending || pending.aborted || pending.state !== 'streaming') {
@@ -122,25 +122,24 @@ function handleHttpChunk({ requestId, seq } = {}, chunk) {
 	pending.nextExpectedSeq += 1;
 	resetChunkTimeout(requestId);
 
-	Promise.resolve(pending.onChunk?.(data))
-		.then(() => {
-			const current = pendingHttpRequests.get(requestId);
-			if (!current || current.aborted || current.state !== 'streaming') {
-				return;
-			}
-			const nodeSocket = getNodeSocket(current.nodeId);
-			if (!nodeSocket?.connected) {
-				failPendingRequest(requestId, Object.assign(new Error('Node offline'), { status: 503 }));
-				return;
-			}
-			nodeSocket.emit('proxy:http:chunk:ack', { requestId, seq });
-		})
-		.catch((error) => {
-			if (!error.status) {
-				error.status = 500;
-			}
-			failPendingRequest(requestId, error);
-		});
+	try {
+		await pending.onChunk?.(data);
+		const current = pendingHttpRequests.get(requestId);
+		if (!current || current.aborted || current.state !== 'streaming') {
+			return;
+		}
+		const nodeSocket = getNodeSocket(current.nodeId);
+		if (!nodeSocket?.connected) {
+			failPendingRequest(requestId, Object.assign(new Error('Node offline'), { status: 503 }));
+			return;
+		}
+		nodeSocket.emit('proxy:http:chunk:ack', { requestId, seq });
+	} catch (error) {
+		if (!error.status) {
+			error.status = 500;
+		}
+		failPendingRequest(requestId, error);
+	}
 }
 
 function handleHttpEnd({ requestId } = {}) {
@@ -254,7 +253,7 @@ async function fetchNodeAsset(nodeId, assetPath) {
 			result.contentType = headers['content-type'] || result.contentType;
 		},
 		// async so a thrown cap error surfaces as a rejected promise that handleHttpChunk's
-		// .catch turns into failPendingRequest, rather than a synchronous throw in the event handler.
+		// catch turns into failPendingRequest, rather than a synchronous throw in the event handler.
 		onChunk: async (chunk) => {
 			bufferedBytes += chunk.length;
 			if (bufferedBytes > MAX_BUFFERED_ASSET_BYTES) {

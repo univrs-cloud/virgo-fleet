@@ -22,7 +22,9 @@ async function signup(req, res) {
 		// If we created the pending row but the email never went out, drop it so the user can
 		// retry immediately instead of hitting "a link was already sent" limbo.
 		if (pending) {
-			await DataService.deletePendingUser(pending.email).catch(() => {});
+			try {
+				await DataService.deletePendingUser(pending.email);
+			} catch { }
 		}
 		res.status(400).json({ status: 'failed', message: error.message });
 	}

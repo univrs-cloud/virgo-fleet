@@ -21,7 +21,9 @@ const onConnection = (socket, module) => {
 			ack({ status: 'succeeded', email: pending.email });
 		} catch (error) {
 			if (pending) {
-				await DataService.deletePendingUser(pending.email).catch(() => {});
+				try {
+					await DataService.deletePendingUser(pending.email);
+				} catch { }
 			}
 			ack({ status: 'failed', message: error.message });
 		}

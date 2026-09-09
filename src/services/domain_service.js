@@ -166,9 +166,13 @@ class DomainService {
 	 * cleanups of a wildcard order collapse into one probe. */
 	static scheduleReprobe(nodeId, publicIp) {
 		clearTimeout(pendingReprobes.get(nodeId));
-		const timer = setTimeout(() => {
+		const timer = setTimeout(async () => {
 			pendingReprobes.delete(nodeId);
-			this.reprobe(nodeId, publicIp).catch((error) => { console.error(`[domains] reprobe failed for ${nodeId}: ${error.message}`); });
+			try {
+				await this.reprobe(nodeId, publicIp);
+			} catch (error) {
+				console.error(`[domains] reprobe failed for ${nodeId}: ${error.message}`);
+			}
 		}, REPROBE_DELAY_MS);
 		timer.unref();
 		pendingReprobes.set(nodeId, timer);

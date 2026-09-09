@@ -49,7 +49,9 @@ class PushService {
 		} catch (error) {
 			// 404/410 mean the browser has dropped this subscription; prune it so we stop trying.
 			if (error?.statusCode === 404 || error?.statusCode === 410) {
-				await DataService.deletePushSubscription(sub.endpoint).catch(() => {});
+				try {
+					await DataService.deletePushSubscription(sub.endpoint);
+				} catch { }
 				return;
 			}
 			console.error('[push] Failed to send notification:', error?.statusCode || error?.message || error);

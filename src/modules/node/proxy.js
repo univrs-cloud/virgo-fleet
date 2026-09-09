@@ -215,10 +215,12 @@ const broadcastNodes = async (module, affectedUserIds) => {
 };
 
 const register = (module) => {
-	module.eventEmitter.on('nodes:updated', (payload) => {
-		broadcastNodes(module, payload?.userIds).catch((error) => {
+	module.eventEmitter.on('nodes:updated', async (payload) => {
+		try {
+			await broadcastNodes(module, payload?.userIds);
+		} catch (error) {
 			console.error('Error broadcasting nodes:', error);
-		});
+		}
 	});
 };
 
