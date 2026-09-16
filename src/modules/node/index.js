@@ -131,6 +131,44 @@ class NodeModule {
 		return this.#nodeIdByMachineId.get(machineId) ?? null;
 	}
 
+	async initialize() {
+		try {
+			for (const { nodeId, machineId, peers } of await DataService.listNodePeering()) {
+				if (machineId) {
+					this.#machineIdByNodeId.set(nodeId, machineId);
+					this.#nodeIdByMachineId.set(machineId, nodeId);
+				}
+				if (peers.length) {
+					this.#peersByNodeId.set(nodeId, peers);
+				}
+			}
+		} catch (error) {
+			console.error('Error restoring node peering:', error);
+		}
+	}
+
+	async #forgetNodePeering(nodeId) {
+		const machineId = this.#machineIdByNodeId.get(nodeId);
+		if (machineId && this.#nodeIdByMachineId.get(machineId) === nodeId) {
+			this.#nodeIdByMachineId.delete(machineId);
+		}
+		this.#machineIdByNodeId.delete(nodeId);
+		this.#peersByNodeId.delete(nodeId);
+		if (!machineId) {
+			return;
+		}
+		for (const [peerNodeId, peers] of this.#peersByNodeId) {
+			if (peers.includes(machineId)) {
+				this.#peersByNodeId.set(peerNodeId, peers.filter((peer) => { return peer !== machineId; }));
+			}
+		}
+		try {
+			await DataService.removeNodePeer(machineId);
+		} catch (error) {
+			console.error('Error removing node from peer lists:', error);
+		}
+	}
+
 	/** Fully removes a node from the fleet: asks an online node to unregister (wiping its own fleet
 	 * config) first, then deletes the fleet records and drops its connection. Remaining members are
 	 * refreshed so it disappears from their inventory. Used by the owner "Remove from inventory". */
@@ -139,6 +177,7 @@ class NodeModule {
 		await this.#requestUnregister(nodeId);
 		await DomainService.release(nodeId);
 		await DataService.deleteNode(nodeId);
+		await this.#forgetNodePeering(nodeId);
 		this.disconnectNode(nodeId);
 		this.eventEmitter.emit('nodes:updated', { userIds: affected });
 	}
@@ -148,6 +187,7 @@ class NodeModule {
 	async unregisterNodes(nodeIds) {
 		for (const nodeId of nodeIds || []) {
 			await this.#requestUnregister(nodeId);
+			await this.#forgetNodePeering(nodeId);
 			this.disconnectNode(nodeId);
 		}
 	}
@@ -238,17 +278,27 @@ class NodeModule {
 
 					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node ups:');
 				});
-				socket.on('node:peers', ({ selfId, peers } = {}) => {
+				socket.on('node:peers', async ({ selfId, peers } = {}) => {
 					if (selfId) {
 						const previousMachineId = this.#machineIdByNodeId.get(socket.data.nodeId);
 						if (previousMachineId && previousMachineId !== selfId) {
 							this.#nodeIdByMachineId.delete(previousMachineId);
 						}
+						const previousNodeId = this.#nodeIdByMachineId.get(selfId);
+						if (previousNodeId && previousNodeId !== socket.data.nodeId) {
+							this.#machineIdByNodeId.delete(previousNodeId);
+						}
 						this.#machineIdByNodeId.set(socket.data.nodeId, selfId);
 						this.#nodeIdByMachineId.set(selfId, socket.data.nodeId);
 					}
-					this.#peersByNodeId.set(socket.data.nodeId, Array.isArray(peers) ? peers : []);
+					const reported = Array.isArray(peers) ? peers : [];
+					this.#peersByNodeId.set(socket.data.nodeId, reported);
 					this.#broadcastNodesUpdated(socket.data.nodeId, 'Error broadcasting node peers:');
+					try {
+						await DataService.setNodePeering(socket.data.nodeId, { machineId: selfId, peers: reported });
+					} catch (error) {
+						console.error('Error persisting node peers:', error);
+					}
 				});
 				socket.on('node:capabilities', (capabilities = {}) => {
 					this.#capabilitiesByNodeId.set(socket.data.nodeId, { webrtc: Boolean(capabilities.webrtc) });

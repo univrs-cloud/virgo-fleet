@@ -1099,6 +1099,63 @@ class DataService {
 		await Node.update({ lastStorageSignature: signature }, { where: { nodeId } });
 	}
 
+	static async listNodePeering() {
+		const nodes = await Node.findAll({ attributes: ['nodeId', 'machineId', 'peers'] });
+		return nodes.map((node) => {
+			return {
+				nodeId: node.nodeId,
+				machineId: node.machineId || null,
+				peers: Array.isArray(node.peers) ? node.peers : []
+			};
+		});
+	}
+
+	static async removeNodePeer(machineId) {
+		const normalizedMachineId = String(machineId || '').trim();
+		if (!normalizedMachineId) {
+			return [];
+		}
+		const affected = [];
+		await sequelize.transaction(async (transaction) => {
+			const nodes = await Node.findAll({ attributes: ['nodeId', 'peers'], transaction });
+			for (const node of nodes) {
+				const peers = Array.isArray(node.peers) ? node.peers : [];
+				if (!peers.includes(normalizedMachineId)) {
+					continue;
+				}
+				const remaining = peers.filter((peer) => { return peer !== normalizedMachineId; });
+				await Node.update({ peers: remaining }, { where: { nodeId: node.nodeId }, transaction });
+				affected.push(node.nodeId);
+			}
+		});
+		return affected;
+	}
+
+	static async setNodePeering(nodeId, { machineId, peers }) {
+		const normalizedNodeId = String(nodeId || '').trim();
+		if (!normalizedNodeId) {
+			return;
+		}
+		const normalizedMachineId = String(machineId || '').trim() || null;
+		const normalizedPeers = Array.isArray(peers) ? peers : [];
+		await sequelize.transaction(async (transaction) => {
+			if (normalizedMachineId) {
+				await Node.update({ machineId: null }, {
+					where: {
+						machineId: normalizedMachineId,
+						nodeId: { [Op.ne]: normalizedNodeId }
+					},
+					transaction
+				});
+			}
+			const values = { peers: normalizedPeers };
+			if (normalizedMachineId) {
+				values.machineId = normalizedMachineId;
+			}
+			await Node.update(values, { where: { nodeId: normalizedNodeId }, transaction });
+		});
+	}
+
 	/** Upsert a browser's push subscription, keyed by its endpoint. A re-subscribe from the same
 	 * install carries the same endpoint, so we refresh its keys and (re)assign it to this user rather
 	 * than creating a duplicate. */

@@ -12,21 +12,29 @@ const Node = sequelize.define('Node', {
 		allowNull: false,
 		unique: true
 	},
+	ownerUserId: {
+		type: DataTypes.INTEGER,
+		allowNull: true
+	},
+	machineId: {
+		type: DataTypes.TEXT,
+		allowNull: true
+	},
+	peers: {
+		type: DataTypes.JSONB,
+		allowNull: true
+	},
 	name: {
 		type: DataTypes.STRING,
 		allowNull: false
-	},
-	lastSeenAt: {
-		type: DataTypes.DATE,
-		allowNull: true
 	},
 	token: {
 		type: DataTypes.STRING,
 		allowNull: true,
 		unique: true
 	},
-	ownerUserId: {
-		type: DataTypes.INTEGER,
+	lastSeenAt: {
+		type: DataTypes.DATE,
 		allowNull: true
 	},
 	// Signature of the update set last pushed to members, so a node re-reporting the same available

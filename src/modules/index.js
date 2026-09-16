@@ -13,6 +13,10 @@ export default async () => {
 		createNodeModule()
 	];
 
+	await Promise.all(modules.map((module) => {
+		return module.initialize?.();
+	}));
+
 	return {
 		modules
 	};
