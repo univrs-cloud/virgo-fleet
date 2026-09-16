@@ -205,6 +205,7 @@ class NodeModule {
 						}
 						socket.data.role = 'node';
 						socket.data.nodeId = node.nodeId;
+						socket.data.transient = Boolean(socket.handshake?.auth?.transient);
 						next();
 						return;
 					}
@@ -228,7 +229,7 @@ class NodeModule {
 
 	#setupConnectionHandlers() {
 		this.#nsp.on('connection', (socket) => {
-			if (socket.data?.role === 'node' && socket.data?.nodeId) {
+			if (socket.data?.role === 'node' && socket.data?.nodeId && !socket.data?.transient) {
 				this.setNodeSocket(socket.data.nodeId, socket);
 				this.#handleNodePresence(socket.data.nodeId, true);
 				DomainService.reprobe(socket.data.nodeId, getSocketClientAddress(socket))
