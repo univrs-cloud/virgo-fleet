@@ -1,7 +1,7 @@
 {
 	"name": "virgo-fleet",
 	"version": "1.0.0",
-	"description": "virgo Fleet",
+	"description": "virgoOS Fleet",
 	"author": "univrs",
 	"license": "UNLICENSED",
 	"main": "index.js",
