@@ -348,7 +348,7 @@ class NodeModule {
 			return String(ups);
 		}
 
-		return `${ups.powerSource}:${ups.isCharging}:${Math.round(ups.capacity ?? 0)}`;
+		return `${ups.error}:${ups.batteryCharge}:${ups.powerSource}:${ups.isCharging}:${Math.round(ups.capacity ?? 0)}`;
 	}
 
 	/** The shape of a node's system update the fleet is willing to show: anything it can't read as a
