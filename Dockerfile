@@ -1,5 +1,5 @@
 # Set the target at build time:
-#   docker buildx build --platform linux/arm64 -t <tag> .
+#   docker buildx build --platform linux/amd64,linux/arm64 -t <tag> .
 FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
