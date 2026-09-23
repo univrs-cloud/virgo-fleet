@@ -25,7 +25,6 @@ export default async (req, res, next) => {
 			groups: req.headers['remote-groups']?.split(',')
 		};
 		res.cookie('account', serializeAccount(account), cookieOptions);
-		res.header('Access-Control-Allow-Origin', '*');
 		next();
 		return;
 	}
@@ -47,7 +46,6 @@ export default async (req, res, next) => {
 					user: session.User,
 					mfaState: session.mfaState
 				});
-				res.header('Access-Control-Allow-Origin', '*');
 				next();
 				return;
 			}
@@ -57,6 +55,5 @@ export default async (req, res, next) => {
 	}
 
 	clearAuthCookies(res, req);
-	res.header('Access-Control-Allow-Origin', '*');
 	next();
 };
