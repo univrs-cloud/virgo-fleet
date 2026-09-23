@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { sequelize } from '../database/index.js';
@@ -775,6 +775,8 @@ class DataService {
 		if (!normalizedNodeId) {
 			throw new Error('nodeId is required.');
 		}
+
+		const token = randomBytes(32).toString('hex');
 		const [node, created] = await Node.findOrCreate({
 			where: { nodeId: normalizedNodeId },
 			defaults: {
@@ -782,7 +784,7 @@ class DataService {
 				name: name || normalizedNodeId,
 				lastSeenAt: new Date(),
 				ownerUserId: ownerUserId || null,
-				token: randomBytes(32).toString('hex')
+				token: DataService.hashNodeToken(token)
 			}
 		});
 		// Prevent ownership hijacking: an already-registered node can only be re-registered by its
@@ -799,10 +801,14 @@ class DataService {
 		// credential: a token captured from an earlier registration stops working, and a node that
 		// re-registers is the only holder of the new one. The node persists what the ack returns.
 		if (!created) {
-			node.token = randomBytes(32).toString('hex');
+			node.token = DataService.hashNodeToken(token);
 		}
 		await node.save();
-		return node;
+		return { node, token };
+	}
+
+	static hashNodeToken(token) {
+		return createHash('sha256').update(String(token)).digest('hex');
 	}
 
 	static async getNodeByToken(token) {
@@ -810,7 +816,7 @@ class DataService {
 		if (!normalizedToken) {
 			return null;
 		}
-		return Node.findOne({ where: { token: normalizedToken } });
+		return Node.findOne({ where: { token: DataService.hashNodeToken(normalizedToken) } });
 	}
 
 	static async touchNodeLastSeen(nodeId) {

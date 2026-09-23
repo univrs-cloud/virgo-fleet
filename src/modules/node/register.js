@@ -47,7 +47,7 @@ const onConnection = (socket, module) => {
 				return;
 			}
 
-			const node = await DataService.upsertNode({
+			const { token } = await DataService.upsertNode({
 				nodeId,
 				name,
 				ownerUserId: owner.id
@@ -65,7 +65,7 @@ const onConnection = (socket, module) => {
 			socket.data.nodeId = nodeId;
 			module.setNodeSocket(nodeId, socket);
 			module.eventEmitter.emit('nodes:updated', { userIds: [owner.id] });
-			ack({ status: 'succeeded', nodeId, token: node.token });
+			ack({ status: 'succeeded', nodeId, token });
 		} catch (error) {
 			ack({ status: 'failed', message: error.message });
 		}
