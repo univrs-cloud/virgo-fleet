@@ -1,15 +1,19 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { getRequestClientContext } from '../utils/client_context.js';
+
+// The address a limiter keys on: the same rule the sockets and the session records use, so a client
+// the proxy did not vouch for cannot forge a header and land itself in a fresh bucket every attempt.
+const clientKey = (request) => {
+	return ipKeyGenerator(getRequestClientContext(request).ipAddress || 'unknown');
+};
 
 // Limits repeated auth attempts per client IP to slow brute-force / credential-stuffing.
-// `trust proxy` is enabled on the app, so the limiter keys off the real client IP.
 export const authRateLimiter = rateLimit({
 	windowMs: 15 * 60 * 1000,
 	max: 20,
 	standardHeaders: true,
 	legacyHeaders: false,
-	// The app runs behind a trusted reverse proxy (`trust proxy` is on), so the client IP comes
-	// from X-Forwarded-For; silence the limiter's permissive-trust-proxy validation.
-	validate: { trustProxy: false },
+	keyGenerator: clientKey,
 	message: { status: 'failed', message: 'Too many attempts, please try again later.' }
 });
 
@@ -22,6 +26,6 @@ export const webauthnOptionsRateLimiter = rateLimit({
 	max: 120,
 	standardHeaders: true,
 	legacyHeaders: false,
-	validate: { trustProxy: false },
+	keyGenerator: clientKey,
 	message: { status: 'failed', message: 'Too many attempts, please try again later.' }
 });
