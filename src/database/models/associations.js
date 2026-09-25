@@ -1,6 +1,7 @@
 import Node from './Node.js';
 import NodeConnectivityEvent from './NodeConnectivityEvent.js';
-import NodeDomain from './NodeDomain.js';
+import Cluster from './Cluster.js';
+import ClusterMember from './ClusterMember.js';
 import AcmeChallenge from './AcmeChallenge.js';
 import Session from './Session.js';
 import PendingUser from './PendingUser.js';
@@ -76,8 +77,10 @@ User.hasMany(Group, { as: 'createdGroups', foreignKey: 'createdByUserId', onDele
 Node.hasMany(NodeConnectivityEvent, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
 NodeConnectivityEvent.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
 
-Node.hasOne(NodeDomain, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
-NodeDomain.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
+Cluster.hasMany(ClusterMember, { foreignKey: 'clusterId', onDelete: 'CASCADE' });
+ClusterMember.belongsTo(Cluster, { foreignKey: 'clusterId', onDelete: 'CASCADE' });
+Node.hasOne(ClusterMember, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
+ClusterMember.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
 
 Node.hasMany(AcmeChallenge, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
 AcmeChallenge.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
@@ -87,7 +90,8 @@ export {
 	Group,
 	Node,
 	NodeConnectivityEvent,
-	NodeDomain,
+	Cluster,
+	ClusterMember,
 	AcmeChallenge,
 	Session,
 	PendingUser,

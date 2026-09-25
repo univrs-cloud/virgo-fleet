@@ -1,10 +1,10 @@
 import tls from 'tls';
 import { Op } from 'sequelize';
-import { NodeDomain, AcmeChallenge } from '../database/models/associations.js';
+import { Node, Cluster, ClusterMember, AcmeChallenge } from '../database/models/associations.js';
 import CloudflareService from './cloudflare.js';
 
 const LABEL_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
-const RESERVED_LABELS = new Set([
+const RESERVED_CLUSTER_NAMES = new Set([
 	'fleet', 'apps', 'packages', 'www', 'api', 'auth', 'admin', 'mail', 'smtp', 'imap',
 	'ns', 'ns1', 'ns2', 'mx', 'traefik', 'status', 'docs', 'blog', 'cdn', 'static'
 ]);
@@ -27,6 +27,66 @@ class DomainService {
 
 	static normalizeName(name) {
 		return String(name || '').trim().toLowerCase().replace(/\.$/, '');
+	}
+
+	static getZoneLabel(domainName) {
+		const zone = this.getZone();
+		const domain = this.normalizeName(domainName);
+		return (zone && domain.endsWith(`.${zone}`) ? domain.slice(0, -(zone.length + 1)) : '');
+	}
+
+	static isOnZone(domainName) {
+		const zone = this.getZone();
+		return Boolean(zone) && (this.normalizeName(domainName) === zone || LABEL_PATTERN.test(this.getZoneLabel(domainName)));
+	}
+
+	static parseIdentifier(hostname, domainName) {
+		const zone = this.getZone();
+		const nodeFqdn = this.normalizeName(`${hostname}.${domainName}`);
+		if (!zone || !nodeFqdn.endsWith(`.${zone}`)) {
+			return null;
+		}
+
+		const labels = nodeFqdn.slice(0, -(zone.length + 1)).split('.');
+		if (!labels.every((label) => { return LABEL_PATTERN.test(label); })) {
+			return null;
+		}
+
+		if (labels.length === 1) {
+			return { label: labels[0], fqdn: nodeFqdn, nodeFqdn };
+		}
+
+		if (labels.length === 2) {
+			return { label: labels[1], fqdn: `${labels[1]}.${zone}`, nodeFqdn };
+		}
+
+		return null;
+	}
+
+	static async getMembership(nodeId) {
+		return ClusterMember.findOne({ where: { nodeId }, include: [Cluster] });
+	}
+
+	static async hasLegacyMember(cluster) {
+		const members = await ClusterMember.findAll({ where: { clusterId: cluster.id }, include: [{ model: Node, attributes: ['name', 'domainName'] }] });
+		return members.some((member) => {
+			const identifier = (member.Node?.domainName ? this.parseIdentifier(member.Node.name, member.Node.domainName) : null);
+			return (!identifier || identifier.nodeFqdn === cluster.fqdn);
+		});
+	}
+
+	static async leaveCluster(membership) {
+		const cluster = membership.Cluster;
+		await membership.destroy();
+		if (!await ClusterMember.count({ where: { clusterId: cluster.id } })) {
+			await CloudflareService.deleteRecords(Object.values(cluster.recordIds || {}));
+			await cluster.destroy();
+		}
+	}
+
+	static async getIdentifier(nodeId) {
+		const node = await Node.findOne({ where: { nodeId }, attributes: ['name', 'domainName'] });
+		return (node?.domainName ? this.parseIdentifier(node.name, node.domainName) : null);
 	}
 
 	static isPublicAddress(address) {
@@ -76,65 +136,85 @@ class DomainService {
 			return { available: false, reason: 'invalid' };
 		}
 
-		if (RESERVED_LABELS.has(normalized)) {
+		if (RESERVED_CLUSTER_NAMES.has(normalized)) {
 			return { available: false, reason: 'reserved' };
 		}
 
-		const taken = await NodeDomain.findOne({ where: { fqdn: `${normalized}.${this.getZone()}` } });
-		if (taken && (!nodeId || taken.nodeId !== nodeId)) {
-			return { available: false, reason: 'taken' };
+		const cluster = await Cluster.findOne({ where: { fqdn: `${normalized}.${this.getZone()}` } });
+		if (!cluster) {
+			return { available: true };
 		}
 
-		return { available: true };
+		if (!nodeId) {
+			return { available: true, reason: 'existing' };
+		}
+
+		const node = await Node.findOne({ where: { nodeId }, attributes: ['ownerUserId'] });
+		if (node && node.ownerUserId === cluster.ownerUserId) {
+			return { available: true, reason: 'existing' };
+		}
+
+		return { available: false, reason: 'taken' };
 	}
 
 	static async claim({ nodeId, hostname, domainName, address, publicIp }) {
 		const zone = this.getZone();
-		const label = this.normalizeLabel(hostname);
 		if (!zone) {
 			console.warn(`[domains] ${nodeId}: no CLOUDFLARE_ZONE configured, skipping claim.`);
 			return null;
 		}
 
-		if (this.normalizeLabel(domainName) !== zone) {
-			console.warn(`[domains] ${nodeId}: domain '${domainName}' is not the managed zone '${zone}', skipping claim.`);
+		if (!this.isOnZone(domainName)) {
+			console.warn(`[domains] ${nodeId}: domain '${domainName}' is not under the managed zone '${zone}', skipping claim.`);
 			return null;
 		}
 
-		if (!label) {
+		if (!this.normalizeLabel(hostname)) {
 			console.warn(`[domains] ${nodeId}: no hostname reported, skipping claim.`);
 			return null;
 		}
 
-		const fqdn = `${label}.${zone}`;
-		const existing = await NodeDomain.findOne({ where: { nodeId } });
-		const availability = await this.isAvailable(label);
-		if (!availability.available && existing?.fqdn !== fqdn) {
-			throw new Error(availability.reason === 'taken' ? `${fqdn} is already taken.` : `${label} is not a usable name.`);
+		const identifier = this.parseIdentifier(hostname, domainName);
+		if (!identifier) {
+			console.warn(`[domains] ${nodeId}: '${hostname}.${domainName}' is not a usable name, skipping claim.`);
+			return null;
 		}
 
-		const probed = (this.isPublicAddress(address) ? 'public' : await this.probeTarget(fqdn, publicIp));
-		const target = (existing?.target === 'public' ? 'public' : probed);
-		if (!existing) {
-			return NodeDomain.create({ nodeId, label, fqdn, lanIp: address, publicIp: (this.isPublicAddress(publicIp) ? publicIp : null), target });
+		const { label, fqdn, nodeFqdn } = identifier;
+		const membership = await this.getMembership(nodeId);
+		const joined = (membership?.Cluster?.fqdn === fqdn);
+		let cluster = await Cluster.findOne({ where: { fqdn } });
+		if (!joined) {
+			const availability = await this.isAvailable(label, nodeId);
+			if (!availability.available || (cluster && nodeFqdn === fqdn)) {
+				throw new Error(['invalid', 'reserved'].includes(availability.reason) ? `${label} is not a usable name.` : `${fqdn} is already taken.`);
+			}
 		}
 
-		const renamed = existing.fqdn !== fqdn;
-		if (renamed) {
-			await this.releaseRecords(existing);
+		if (membership && !joined) {
+			await this.leaveCluster(membership);
 		}
 
-		existing.label = label;
-		existing.fqdn = fqdn;
-		existing.lanIp = address || existing.lanIp;
-		existing.publicIp = (this.isPublicAddress(publicIp) ? publicIp : existing.publicIp);
-		existing.target = target;
-		await existing.save();
-		return existing;
+		const probed = (this.isPublicAddress(address) ? 'public' : await this.probeTarget(nodeFqdn, publicIp));
+		if (!cluster) {
+			const node = await Node.findOne({ where: { nodeId }, attributes: ['ownerUserId'] });
+			cluster = await Cluster.create({ label, fqdn, ownerUserId: (node?.ownerUserId ?? null), lanIp: (address || null), publicIp: (this.isPublicAddress(publicIp) ? publicIp : null), target: probed });
+		} else {
+			cluster.lanIp = (address || cluster.lanIp);
+			cluster.publicIp = (this.isPublicAddress(publicIp) ? publicIp : cluster.publicIp);
+			cluster.target = (cluster.target === 'public' ? 'public' : probed);
+			await cluster.save();
+		}
+
+		if (!joined) {
+			await ClusterMember.create({ clusterId: cluster.id, nodeId });
+		}
+
+		return cluster;
 	}
 
 	static async syncRecords(nodeId, publicIp) {
-		const domain = await NodeDomain.findOne({ where: { nodeId } });
+		const domain = (await this.getMembership(nodeId))?.Cluster;
 		if (!domain) {
 			return null;
 		}
@@ -150,14 +230,18 @@ class DomainService {
 		}
 
 		const wildcard = `*.${domain.fqdn}`;
-		await this.replaceConflicting(domain.fqdn, 'A');
 		await this.replaceConflicting(wildcard, 'A');
-		domain.recordIds = {
-			apex: await CloudflareService.upsertA(domain.fqdn, address),
-			wildcard: await CloudflareService.upsertA(wildcard, address)
-		};
+		const recordIds = { wildcard: await CloudflareService.upsertA(wildcard, address) };
+		if (await this.hasLegacyMember(domain)) {
+			await this.replaceConflicting(domain.fqdn, 'A');
+			recordIds.apex = await CloudflareService.upsertA(domain.fqdn, address);
+		} else {
+			await CloudflareService.deleteRecord(domain.recordIds?.apex);
+		}
+
+		domain.recordIds = recordIds;
 		await domain.save();
-		console.log(`[domains] ${domain.fqdn} and ${wildcard} point at ${address} (${domain.target}).`);
+		console.log(`[domains] ${(recordIds.apex ? `${domain.fqdn} and ` : '')}${wildcard} point at ${address} (${domain.target}).`);
 		return domain;
 	}
 
@@ -179,12 +263,12 @@ class DomainService {
 	}
 
 	static async reprobe(nodeId, publicIp) {
-		const domain = await NodeDomain.findOne({ where: { nodeId } });
+		const domain = (await this.getMembership(nodeId))?.Cluster;
 		if (!domain || !publicIp) {
 			return null;
 		}
 
-		const target = await this.probeTarget(domain.fqdn, publicIp);
+		const target = await this.probeTarget(((await this.getIdentifier(nodeId))?.nodeFqdn || domain.fqdn), publicIp);
 		if (target !== 'public' || domain.target === 'public') {
 			return domain;
 		}
@@ -204,40 +288,39 @@ class DomainService {
 		}
 	}
 
-	static async releaseRecords(domain) {
-		await CloudflareService.deleteRecords(Object.values(domain.recordIds || {}));
-		domain.recordIds = {};
-		await domain.save();
-	}
-
-	static async listFqdns(nodeIds) {
-		const domains = await NodeDomain.findAll({ where: { nodeId: { [Op.in]: nodeIds } } });
-		return new Map(domains.map((domain) => { return [domain.nodeId, domain.fqdn]; }));
+	static async listDomains(nodeIds) {
+		const members = await ClusterMember.findAll({ where: { nodeId: { [Op.in]: nodeIds } }, include: [Cluster, { model: Node, attributes: ['name', 'domainName'] }] });
+		return new Map(members.map((member) => {
+			const nodeFqdn = (member.Node?.domainName ? this.parseIdentifier(member.Node.name, member.Node.domainName)?.nodeFqdn : null);
+			return [member.nodeId, { fqdn: member.Cluster.fqdn, nodeFqdn: (nodeFqdn || member.Cluster.fqdn) }];
+		}));
 	}
 
 	static async release(nodeId) {
-		const domain = await NodeDomain.findOne({ where: { nodeId } });
-		if (!domain) {
+		const membership = await this.getMembership(nodeId);
+		if (!membership) {
 			return;
 		}
 
-		await this.releaseRecords(domain);
+		await this.leaveCluster(membership);
 		await this.cleanupAll(nodeId);
-		await domain.destroy();
 	}
 
 	static async authorize(nodeId, name) {
-		const domain = await NodeDomain.findOne({ where: { nodeId } });
+		const domain = (await this.getMembership(nodeId))?.Cluster;
 		if (!domain) {
 			throw new Error('This node has no claimed domain.');
 		}
 
-		const expected = `${CHALLENGE_PREFIX}${domain.fqdn}`;
-		if (this.normalizeName(name) !== expected) {
-			throw new Error(`Only ${expected} can be requested by this node.`);
+		const identifier = await this.getIdentifier(nodeId);
+		const nodeFqdn = (identifier?.fqdn === domain.fqdn ? identifier.nodeFqdn : domain.fqdn);
+		const allowed = [...new Set([domain.fqdn, nodeFqdn])].map((allowedName) => { return `${CHALLENGE_PREFIX}${allowedName}`; });
+		const requested = this.normalizeName(name);
+		if (!allowed.includes(requested)) {
+			throw new Error(`Only ${allowed.join(' and ')} can be requested by this node.`);
 		}
 
-		return { domain, name: expected };
+		return { domain, name: requested };
 	}
 
 	static async present(nodeId, name, value) {

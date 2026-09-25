@@ -134,13 +134,19 @@ class NodeModule {
 
 	setNodeDomainName(nodeId, domainName) {
 		const zone = DomainService.getZone();
-		const onFleetZone = Boolean(zone) && DomainService.normalizeLabel(domainName) === zone;
+		const onFleetZone = Boolean(zone) && DomainService.isOnZone(domainName);
 		if (this.isNodeOnFleetZone(nodeId) === onFleetZone) {
 			return;
 		}
 
 		this.#onFleetZoneByNodeId.set(nodeId, onFleetZone);
 		this.#broadcastNodesUpdated(nodeId, 'Error broadcasting node domain:');
+	}
+
+	async setNodeIdentifier(nodeId, identifier) {
+		if (await DataService.setNodeIdentifier(nodeId, identifier)) {
+			this.#broadcastNodesUpdated(nodeId, 'Error broadcasting node name:');
+		}
 	}
 
 	getNodeIdForMachineId(machineId) {

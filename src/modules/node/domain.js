@@ -17,6 +17,7 @@ const onConnection = (socket, module) => {
 
 		module.setNodeDomainName(socket.data.nodeId, domainName);
 		try {
+			await module.setNodeIdentifier(socket.data.nodeId, { name: hostname, domainName });
 			const publicIp = getSocketClientAddress(socket);
 			const domain = await DomainService.claim({ nodeId: socket.data.nodeId, hostname, domainName, address, publicIp });
 			if (domain) {

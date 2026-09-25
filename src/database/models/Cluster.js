@@ -1,16 +1,11 @@
 import { DataTypes } from 'sequelize';
 import { sequelize } from '../index.js';
 
-const NodeDomain = sequelize.define('NodeDomain', {
+const Cluster = sequelize.define('Cluster', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
 		autoIncrement: true
-	},
-	nodeId: {
-		type: DataTypes.STRING,
-		allowNull: false,
-		unique: true
 	},
 	label: {
 		type: DataTypes.STRING,
@@ -21,6 +16,10 @@ const NodeDomain = sequelize.define('NodeDomain', {
 		allowNull: false,
 		unique: true
 	},
+	ownerUserId: {
+		type: DataTypes.INTEGER,
+		allowNull: true
+	},
 	lanIp: {
 		type: DataTypes.STRING,
 		allowNull: true
@@ -30,7 +29,7 @@ const NodeDomain = sequelize.define('NodeDomain', {
 		allowNull: true
 	},
 	target: {
-		type: DataTypes.ENUM('public', 'lan'),
+		type: DataTypes.STRING,
 		allowNull: false,
 		defaultValue: 'lan'
 	},
@@ -44,7 +43,7 @@ const NodeDomain = sequelize.define('NodeDomain', {
 		allowNull: true
 	}
 }, {
-	tableName: 'node_domains'
+	tableName: 'clusters'
 });
 
-export default NodeDomain;
+export default Cluster;

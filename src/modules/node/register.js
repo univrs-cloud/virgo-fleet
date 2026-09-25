@@ -52,6 +52,7 @@ const onConnection = (socket, module) => {
 				name,
 				ownerUserId: owner.id
 			});
+			await DataService.setNodeIdentifier(nodeId, { name: hostname, domainName });
 			await DataService.grantNodeAccess({
 				email: owner.email,
 				nodeId,

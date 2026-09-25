@@ -978,6 +978,7 @@ class DataService {
 			nodes.set(node.nodeId, {
 				nodeId: node.nodeId,
 				name: node.name,
+				domainName: node.domainName,
 				lastSeenAt: node.lastSeenAt,
 				access: 'direct',
 				isOwner: node.ownerUserId === userId
@@ -991,6 +992,7 @@ class DataService {
 				nodes.set(node.nodeId, {
 					nodeId: node.nodeId,
 					name: node.name,
+					domainName: node.domainName,
 					lastSeenAt: node.lastSeenAt,
 					// Coarse label only — the granting group's name is never exposed to its members.
 					access: 'group',
@@ -1099,6 +1101,24 @@ class DataService {
 	static async getNodeStorageSignature(nodeId) {
 		const node = await Node.findOne({ where: { nodeId }, attributes: ['lastStorageSignature'] });
 		return node?.lastStorageSignature ?? null;
+	}
+
+	static async setNodeIdentifier(nodeId, { name, domainName }) {
+		const node = await Node.findOne({ where: { nodeId } });
+		if (!node) {
+			return false;
+		}
+
+		const normalizedName = (String(name || '').trim() || node.name);
+		const normalizedDomainName = (String(domainName || '').trim().toLowerCase() || null);
+		if (node.name === normalizedName && node.domainName === normalizedDomainName) {
+			return false;
+		}
+
+		node.name = normalizedName;
+		node.domainName = normalizedDomainName;
+		await node.save();
+		return true;
 	}
 
 	static async setNodeStorageSignature(nodeId, signature) {

@@ -28,6 +28,10 @@ const Node = sequelize.define('Node', {
 		type: DataTypes.STRING,
 		allowNull: false
 	},
+	domainName: {
+		type: DataTypes.STRING,
+		allowNull: true
+	},
 	token: {
 		type: DataTypes.STRING,
 		allowNull: true,
