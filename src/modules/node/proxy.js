@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import DataService from '../../services/data_service.js';
+import DomainService from '../../services/domain_service.js';
 import { normalizeEmail } from '../../utils/email.js';
 import { buildConnectivitySegments } from '../../utils/connectivity.js';
 import { disconnectNodeUser, revokeStaleNodeAccess } from '../../utils/node_proxy.js';
@@ -153,11 +154,13 @@ const emitNodes = async (socket, module) => {
 			eventsByNodeId.get(event.nodeId).push(event);
 		}
 		const clusterIdByNodeId = buildClusters(nodes, module);
+		const fqdnByNodeId = await DomainService.listFqdns(nodes.filter((node) => { return node.isOwner; }).map((node) => { return node.nodeId; }));
 		const inventory = await Promise.all(nodes.map(async (node) => {
 			const online = module.isNodeOnline(node.nodeId);
 			const entry = {
 				...node,
 				online,
+				onFleetZone: module.isNodeOnFleetZone(node.nodeId),
 				// Whether the browser should reach this node over a WebRTC data channel rather than
 				// the Socket.IO proxy. Only true while the node is online and advertising support.
 				webrtc: online && Boolean(module.getNodeCapabilities(node.nodeId).webrtc),
@@ -175,6 +178,7 @@ const emitNodes = async (socket, module) => {
 				})
 			};
 			if (node.isOwner) {
+				entry.fqdn = fqdnByNodeId.get(node.nodeId) || null;
 				const members = await DataService.listNodeMembers(node.nodeId);
 				// Direct invites only; groups the node is shared with go in their own key so the owner
 				// can tell them apart and revoke each with the right action (node:revoke vs
@@ -341,6 +345,11 @@ const onConnection = (socket, module) => {
 				disconnectNodeUser(nodeId, socket.userId);
 				module.eventEmitter.emit('nodes:updated', { userIds: affected });
 				ack({ status: 'succeeded' });
+				return;
+			}
+
+			if (module.isNodeOnFleetZone(nodeId)) {
+				ack({ status: 'failed', message: 'Move this node off univrs.cloud before removing it, its certificates depend on the fleet.' });
 				return;
 			}
 

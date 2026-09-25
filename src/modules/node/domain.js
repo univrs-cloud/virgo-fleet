@@ -4,7 +4,7 @@ import { createRateLimiter, getSocketClientAddress } from '../../utils/socket_ra
 const AVAILABILITY_WINDOW_MS = 15 * 60 * 1000;
 const availabilityRateLimiter = createRateLimiter({ windowMs: AVAILABILITY_WINDOW_MS, max: 120 });
 
-const onConnection = (socket) => {
+const onConnection = (socket, module) => {
 	if (socket.data?.role !== 'node') {
 		return;
 	}
@@ -15,6 +15,7 @@ const onConnection = (socket) => {
 			return;
 		}
 
+		module.setNodeDomainName(socket.data.nodeId, domainName);
 		try {
 			const publicIp = getSocketClientAddress(socket);
 			const domain = await DomainService.claim({ nodeId: socket.data.nodeId, hostname, domainName, address, publicIp });

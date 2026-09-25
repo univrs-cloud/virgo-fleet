@@ -33,6 +33,7 @@ class NodeModule {
 	#machineIdByNodeId = new Map();
 	#nodeIdByMachineId = new Map();
 	#capabilitiesByNodeId = new Map();
+	#onFleetZoneByNodeId = new Map();
 
 	constructor() {
 		this.#nsp = socket.getIO().of('/node');
@@ -125,6 +126,21 @@ class NodeModule {
 	 * off — it stays on the Socket.IO proxy, no version floor. */
 	getNodeCapabilities(nodeId) {
 		return this.#capabilitiesByNodeId.get(nodeId) ?? {};
+	}
+
+	isNodeOnFleetZone(nodeId) {
+		return this.#onFleetZoneByNodeId.get(nodeId) ?? false;
+	}
+
+	setNodeDomainName(nodeId, domainName) {
+		const zone = DomainService.getZone();
+		const onFleetZone = Boolean(zone) && DomainService.normalizeLabel(domainName) === zone;
+		if (this.isNodeOnFleetZone(nodeId) === onFleetZone) {
+			return;
+		}
+
+		this.#onFleetZoneByNodeId.set(nodeId, onFleetZone);
+		this.#broadcastNodesUpdated(nodeId, 'Error broadcasting node domain:');
 	}
 
 	getNodeIdForMachineId(machineId) {
@@ -331,6 +347,7 @@ class NodeModule {
 					this.#storageByNodeId.delete(nodeId);
 					this.#upsByNodeId.delete(nodeId);
 					this.#capabilitiesByNodeId.delete(nodeId);
+					this.#onFleetZoneByNodeId.delete(nodeId);
 					disconnectNodeClients(nodeId);
 					// Node's gone: release any in-flight asset requests (and their buffers) now rather
 					// than waiting for their timeouts. Runs after the map delete so the abort emit no-ops.

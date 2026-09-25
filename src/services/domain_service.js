@@ -210,6 +210,11 @@ class DomainService {
 		await domain.save();
 	}
 
+	static async listFqdns(nodeIds) {
+		const domains = await NodeDomain.findAll({ where: { nodeId: { [Op.in]: nodeIds } } });
+		return new Map(domains.map((domain) => { return [domain.nodeId, domain.fqdn]; }));
+	}
+
 	static async release(nodeId) {
 		const domain = await NodeDomain.findOne({ where: { nodeId } });
 		if (!domain) {
