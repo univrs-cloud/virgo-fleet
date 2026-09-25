@@ -10,7 +10,7 @@ export default async ({ sequelize, transaction }) => {
 				"id" SERIAL PRIMARY KEY,
 				"label" VARCHAR(255) NOT NULL,
 				"fqdn" VARCHAR(255) NOT NULL UNIQUE,
-				"ownerUserId" INTEGER,
+				"ownerUserId" INTEGER REFERENCES "users" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
 				"lanIp" VARCHAR(255),
 				"publicIp" VARCHAR(255),
 				"target" VARCHAR(255) NOT NULL DEFAULT 'lan',

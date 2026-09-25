@@ -1,4 +1,5 @@
 import DataService from '../../services/data_service.js';
+import DomainService from '../../services/domain_service.js';
 
 // A fleet user can only delete their own account: identity comes from the authenticated session,
 // never from client input, and no list of users is consulted.
@@ -13,6 +14,7 @@ const deleteUser = async (config, socket, module) => {
 		DataService.listNodesOwnedBy(socket.userId),
 		DataService.listUsersAffectedByUserDeletion(socket.userId)
 	]);
+	await DomainService.releaseOwnedBy(socket.userId);
 	await DataService.deleteUser(email);
 	module.eventEmitter.emit('nodes:updated', { userIds: affectedUserIds });
 	module.eventEmitter.emit('groups:updated');

@@ -77,6 +77,8 @@ User.hasMany(Group, { as: 'createdGroups', foreignKey: 'createdByUserId', onDele
 Node.hasMany(NodeConnectivityEvent, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });
 NodeConnectivityEvent.belongsTo(Node, { foreignKey: 'nodeId', targetKey: 'nodeId', onDelete: 'CASCADE' });
 
+Cluster.belongsTo(User, { as: 'owner', foreignKey: 'ownerUserId', onDelete: 'CASCADE' });
+User.hasMany(Cluster, { as: 'ownedClusters', foreignKey: 'ownerUserId', onDelete: 'CASCADE' });
 Cluster.hasMany(ClusterMember, { foreignKey: 'clusterId', onDelete: 'CASCADE' });
 ClusterMember.belongsTo(Cluster, { foreignKey: 'clusterId', onDelete: 'CASCADE' });
 Node.hasOne(ClusterMember, { foreignKey: 'nodeId', sourceKey: 'nodeId', onDelete: 'CASCADE' });

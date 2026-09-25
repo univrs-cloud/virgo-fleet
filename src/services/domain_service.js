@@ -306,6 +306,18 @@ class DomainService {
 		await this.cleanupAll(nodeId);
 	}
 
+	static async releaseOwnedBy(userId) {
+		const nodes = await Node.findAll({ where: { ownerUserId: userId }, attributes: ['nodeId'] });
+		for (const node of nodes) {
+			await this.release(node.nodeId);
+		}
+
+		for (const cluster of await Cluster.findAll({ where: { ownerUserId: userId } })) {
+			await CloudflareService.deleteRecords(Object.values(cluster.recordIds || {}));
+			await cluster.destroy();
+		}
+	}
+
 	static async authorize(nodeId, name) {
 		const domain = (await this.getMembership(nodeId))?.Cluster;
 		if (!domain) {
