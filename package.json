@@ -18,10 +18,10 @@
 		"arm64"
 	],
 	"dependencies": {
-		"@simplewebauthn/server": "^14.0.2",
+		"@simplewebauthn/server": "^14.0.3",
 		"compression": "^1.8.2",
 		"bcryptjs": "^3.0.3",
-		"dotenv": "^18.0.3",
+		"dotenv": "^18.0.4",
 		"execa": "^10.0.1",
 		"express": "^5.2.1",
 		"express-rate-limit": "^8.7.0",
@@ -33,7 +33,7 @@
 		"pg": "^8.23.0",
 		"pg-hstore": "^2.3.4",
 		"sequelize": "^6.37.8",
-		"socket.io": "^4.8.3",
+		"socket.io": "^4.8.4",
 		"web-push": "^3.6.7"
 	},
 	"overrides": {
