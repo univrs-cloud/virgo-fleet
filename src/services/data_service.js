@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import bcrypt from 'bcryptjs';
 import { Op } from 'sequelize';
 import { sequelize } from '../database/index.js';
@@ -790,7 +790,7 @@ class DataService {
 		return true;
 	}
 
-	static async upsertNode({ nodeId, name, ownerUserId }) {
+	static async upsertNode({ nodeId, name, ownerUserId, currentToken }) {
 		const normalizedNodeId = String(nodeId || '').trim();
 		if (!normalizedNodeId) {
 			throw new Error('nodeId is required.');
@@ -812,6 +812,9 @@ class DataService {
 		if (!created && ownerUserId && node.ownerUserId && node.ownerUserId !== ownerUserId) {
 			throw new Error('This node is already registered to another account.');
 		}
+		if (!created && !DataService.matchesNodeToken(node.token, currentToken)) {
+			throw new Error('This node is already registered. Remove it from your fleet inventory to register it again.');
+		}
 		node.name = name || node.name;
 		node.lastSeenAt = new Date();
 		if (ownerUserId) {
@@ -829,6 +832,16 @@ class DataService {
 
 	static hashNodeToken(token) {
 		return createHash('sha256').update(String(token)).digest('hex');
+	}
+
+	static matchesNodeToken(storedHash, token) {
+		const presented = String(token || '').trim();
+		if (!presented || !storedHash) {
+			return false;
+		}
+		const expected = Buffer.from(String(storedHash));
+		const actual = Buffer.from(DataService.hashNodeToken(presented));
+		return expected.length === actual.length && timingSafeEqual(expected, actual);
 	}
 
 	static async getNodeByToken(token) {

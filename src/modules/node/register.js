@@ -50,7 +50,8 @@ const onConnection = (socket, module) => {
 			const { token } = await DataService.upsertNode({
 				nodeId,
 				name,
-				ownerUserId: owner.id
+				ownerUserId: owner.id,
+				currentToken: config?.token
 			});
 			await DataService.setNodeIdentifier(nodeId, { name: hostname, domainName });
 			await DataService.grantNodeAccess({
