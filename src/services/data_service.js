@@ -790,13 +790,17 @@ class DataService {
 		return true;
 	}
 
-	static async upsertNode({ nodeId, name, ownerUserId, currentToken }) {
+	static async upsertNode({ nodeId, name, ownerUserId, currentToken, proposedToken }) {
 		const normalizedNodeId = String(nodeId || '').trim();
 		if (!normalizedNodeId) {
 			throw new Error('nodeId is required.');
 		}
 
-		const token = randomBytes(32).toString('hex');
+		const proposed = String(proposedToken || '').trim();
+		if (proposed && !/^[a-f0-9]{64}$/i.test(proposed)) {
+			throw new Error('Invalid node token.');
+		}
+		const token = proposed || randomBytes(32).toString('hex');
 		const [node, created] = await Node.findOrCreate({
 			where: { nodeId: normalizedNodeId },
 			defaults: {
@@ -812,19 +816,14 @@ class DataService {
 		if (!created && ownerUserId && node.ownerUserId && node.ownerUserId !== ownerUserId) {
 			throw new Error('This node is already registered to another account.');
 		}
-		if (!created && !DataService.matchesNodeToken(node.token, currentToken)) {
+		if (!created && !DataService.matchesNodeToken(node.token, currentToken) && !DataService.matchesNodeToken(node.token, proposed)) {
 			throw new Error('This node is already registered. Remove it from your fleet inventory to register it again.');
 		}
+		node.token = DataService.hashNodeToken(token);
 		node.name = name || node.name;
 		node.lastSeenAt = new Date();
 		if (ownerUserId) {
 			node.ownerUserId = ownerUserId;
-		}
-		// Every registration mints a fresh token, so completing one invalidates the previous
-		// credential: a token captured from an earlier registration stops working, and a node that
-		// re-registers is the only holder of the new one. The node persists what the ack returns.
-		if (!created) {
-			node.token = DataService.hashNodeToken(token);
 		}
 		await node.save();
 		return { node, token };

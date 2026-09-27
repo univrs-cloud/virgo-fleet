@@ -51,7 +51,8 @@ const onConnection = (socket, module) => {
 				nodeId,
 				name,
 				ownerUserId: owner.id,
-				currentToken: config?.token
+				currentToken: config?.token,
+				proposedToken: config?.registrationToken
 			});
 			await DataService.setNodeIdentifier(nodeId, { name: hostname, domainName });
 			await DataService.grantNodeAccess({
