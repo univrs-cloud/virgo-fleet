@@ -1,34 +1,16 @@
-import * as trustedProxy from '../utils/trusted_proxy.js';
 import DataService from '../services/data_service.js';
 import {
-	buildAccountFromUser,
 	clearAuthCookies,
-	getCookieOptions,
 	getSessionTokenFromCookieHeader,
-	serializeAccount,
 	setAuthCookies
 } from '../utils/auth_cookies.js';
 
 /**
- * Sets the account cookie so the UI matches virgo-api / Authelia shape.
- * Trusted-proxy headers (Traefik + Authelia) take precedence; otherwise a
- * valid virgo.session cookie from fleet login is used.
+ * Sets the account cookie from a valid virgo.session cookie issued by fleet login. Fleet is
+ * internet-facing with no Authelia in front, so no request header (Remote-User etc.) is trusted —
+ * the signed session cookie is the only identity source.
  */
 export default async (req, res, next) => {
-	const cookieOptions = getCookieOptions(req);
-
-	if (trustedProxy.isFromTrustedProxy(req.socket?.remoteAddress) && req.headers['remote-user']) {
-		const account = {
-			name: req.headers['remote-name'],
-			user: req.headers['remote-user'],
-			email: req.headers['remote-email'],
-			groups: req.headers['remote-groups']?.split(',')
-		};
-		res.cookie('account', serializeAccount(account), cookieOptions);
-		next();
-		return;
-	}
-
 	const sessionToken = getSessionTokenFromCookieHeader(req.headers.cookie);
 	if (sessionToken) {
 		try {

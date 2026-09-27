@@ -1,6 +1,9 @@
 /**
- * Trust remote-user headers only when the TCP peer matches built-in defaults or
- * entries added via add() from configuration key `trustedProxies` (merged with defaults).
+ * Whether a TCP peer is one of our own reverse proxies, so its forwarded headers
+ * (X-Forwarded-For, X-Forwarded-Host) can be believed for client-IP and origin checks. Identity is
+ * never taken from a request header — fleet is internet-facing with no Authelia, so the signed
+ * session cookie is the only identity source. Matches the built-in defaults or entries added via
+ * add() from configuration key `trustedProxies` (merged with defaults).
  *
  * Each rule is either an exact IP (after ::ffff: stripping) or an IPv4 prefix
  * ending with "." (e.g. "10.0." matches 10.0.x.x).
