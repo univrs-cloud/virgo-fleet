@@ -54,6 +54,21 @@ function emitSessionsUpdated(userId) {
 	}
 }
 
+function emitSessionsRevoked(sessionIds) {
+	if (sessionIds.length) {
+		eventEmitter.emit('sessions:revoked', { sessionIds });
+	}
+}
+
+async function destroySessions(where, transaction) {
+	const sessions = await Session.findAll({ where, attributes: ['id'], transaction });
+	const sessionIds = sessions.map((session) => { return session.id; });
+	if (sessionIds.length) {
+		await Session.destroy({ where: { id: sessionIds }, transaction });
+	}
+	return sessionIds;
+}
+
 function pruneSessionTouches() {
 	if (sessionTouchedAt.size <= SESSION_TOUCH_CACHE_LIMIT) {
 		return;
@@ -182,8 +197,14 @@ class DataService {
 		if (!user) {
 			throw new Error(`User ${email} not found.`);
 		}
-		// Sessions, owned nodes, created groups, memberships and access rows all cascade from this.
-		await user.destroy();
+		const sessionIds = await sequelize.transaction(async (transaction) => {
+			await User.findByPk(user.id, { lock: transaction.LOCK.UPDATE, transaction });
+			const ids = await destroySessions({ userId: user.id }, transaction);
+			// Sessions, owned nodes, created groups, memberships and access rows all cascade from this.
+			await user.destroy({ transaction });
+			return ids;
+		});
+		emitSessionsRevoked(sessionIds);
 		return true;
 	}
 
@@ -195,7 +216,7 @@ class DataService {
 		user.passwordHash = bcrypt.hashSync(password, PASSWORD_COST);
 		await user.save();
 		// Invalidate every existing session so a changed password logs out all devices.
-		await Session.destroy({ where: { userId: user.id } });
+		emitSessionsRevoked(await destroySessions({ userId: user.id }));
 		emitSessionsUpdated(user.id);
 		return true;
 	}
@@ -204,7 +225,7 @@ class DataService {
 		const token = randomBytes(48).toString('hex');
 		const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 		// Opportunistically clear this user's expired sessions whenever they log in.
-		await Session.destroy({ where: { userId: userId, expiresAt: { [Op.lt]: new Date() } } });
+		emitSessionsRevoked(await destroySessions({ userId: userId, expiresAt: { [Op.lt]: new Date() } }));
 		await Session.create({
 			token,
 			expiresAt,
@@ -269,20 +290,18 @@ class DataService {
 			throw new Error('Session not found.');
 		}
 		await session.destroy();
+		emitSessionsRevoked([session.id]);
 		emitSessionsUpdated(userId);
 		return session.id;
 	}
 
 	static async revokeOtherSessions(userId, currentToken) {
-		const sessions = await Session.findAll({
-			where: {
-				userId,
-				token: { [Op.ne]: currentToken ?? '' }
-			}
+		const sessionIds = await destroySessions({
+			userId,
+			token: { [Op.ne]: currentToken ?? '' }
 		});
-		const sessionIds = sessions.map((session) => { return session.id; });
 		if (sessionIds.length) {
-			await Session.destroy({ where: { id: sessionIds } });
+			emitSessionsRevoked(sessionIds);
 			emitSessionsUpdated(userId);
 		}
 		return sessionIds;
@@ -312,6 +331,7 @@ class DataService {
 			return;
 		}
 		await session.destroy();
+		emitSessionsRevoked([session.id]);
 		emitSessionsUpdated(session.userId);
 	}
 

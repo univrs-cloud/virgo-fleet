@@ -505,9 +505,19 @@ const closeNodeWebrtcSessionsForUser = (nodeId, userId) => {
 	}
 };
 
+const closeWebrtcSessionsForFleetSessions = (fleetSessionIds) => {
+	const revoked = new Set(fleetSessionIds);
+	for (const [sessionId, session] of [...sessions]) {
+		if (revoked.has(session.clientSocket?.sessionId)) {
+			closeSession(sessionId, { reason: 'session-revoked' });
+		}
+	}
+};
+
 export {
 	registerWebrtcSignaling,
 	attachNodeWebrtcSignaling,
 	closeNodeWebrtcSessions,
-	closeNodeWebrtcSessionsForUser
+	closeNodeWebrtcSessionsForUser,
+	closeWebrtcSessionsForFleetSessions
 };

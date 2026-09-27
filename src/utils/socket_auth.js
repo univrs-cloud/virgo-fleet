@@ -17,7 +17,7 @@ async function applyFleetUserSession(socket, sessionToken) {
 	socket.userId = session.User.id;
 	// Bound here because every namespace authenticates through this function; revoking a session
 	// then drops its live connections instead of waiting for them to reconnect.
-	sessionSockets.track(socket, session.id);
+	sessionSockets.track(socket, session.id, session.expiresAt);
 	DataService.touchSession(sessionToken).catch((error) => {
 		console.error('Failed to record fleet session activity:', error);
 	});

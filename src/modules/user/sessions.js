@@ -1,6 +1,7 @@
 import DataService from '../../services/data_service.js';
 import { getSessionTokenFromCookieHeader } from '../../utils/auth_cookies.js';
 import * as sessionSockets from '../../utils/session_sockets.js';
+import { closeWebrtcSessionsForFleetSessions } from '../../utils/webrtc_signal.js';
 
 /** Self-service like the rest of `/user`: every query is scoped by the socket's own userId, so an
  * id from another account matches nothing, and the session token never leaves the server. */
@@ -25,23 +26,24 @@ const broadcastSessions = async (module, userId) => {
 	await Promise.all(sockets.map((socket) => { return emitSessions(socket); }));
 };
 
-const revokeSession = async (config, socket) => {
-	const sessionId = await DataService.revokeSession(socket.userId, config?.id);
-	// Deleting the row only stops the next sign-in; this drops what that session already holds open,
-	// across the fleet namespaces and any proxied node ones.
-	sessionSockets.disconnectSessions([sessionId]);
-};
-
 // Everything but the session making the request — the lost-device switch. Unlike a password change,
 // which ends every session, this one keeps the caller signed in.
 const revokeOtherSessions = async (socket) => {
 	const currentToken = getSessionTokenFromCookieHeader(socket.handshake?.headers?.cookie);
 	const sessionIds = await DataService.revokeOtherSessions(socket.userId, currentToken);
-	sessionSockets.disconnectSessions(sessionIds);
 	return sessionIds.length;
 };
 
 const register = (module) => {
+	module.eventEmitter.on('sessions:revoked', ({ sessionIds } = {}) => {
+		try {
+			closeWebrtcSessionsForFleetSessions(sessionIds ?? []);
+			sessionSockets.disconnectSessions(sessionIds ?? []);
+		} catch (error) {
+			console.error('Error disconnecting revoked sessions:', error);
+		}
+	});
+
 	module.eventEmitter.on('sessions:updated', async (payload) => {
 		try {
 			await broadcastSessions(module, payload?.userId);
@@ -69,7 +71,7 @@ const onConnection = (socket, module) => {
 			if (!socket.isAuthenticated) {
 				return;
 			}
-			await revokeSession(config, socket);
+			await DataService.revokeSession(socket.userId, config?.id);
 			ack({ status: 'succeeded' });
 		} catch (error) {
 			ack({ status: 'failed', message: error.message });

@@ -1,5 +1,6 @@
 import { authenticateSocketUser } from './socket_auth.js';
 import DataService from '../services/data_service.js';
+import { untrack } from './session_sockets.js';
 
 const parseFleetNamespace = (name) => {
 	const parts = String(name || '').split('/');
@@ -25,6 +26,7 @@ const fleetNamespaceMiddleware = async (socket, next) => {
 			return;
 		}
 		if (!(await DataService.canUserAccessNode(socket.userId, parsed.nodeId))) {
+			untrack(socket);
 			next(new Error('Access denied for node'));
 			return;
 		}
@@ -32,6 +34,7 @@ const fleetNamespaceMiddleware = async (socket, next) => {
 		socket.data.targetNamespace = parsed.targetNamespace;
 		next();
 	} catch (error) {
+		untrack(socket);
 		next(error);
 	}
 };
