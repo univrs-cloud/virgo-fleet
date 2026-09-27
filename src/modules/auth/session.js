@@ -2,11 +2,16 @@ import DataService from '../../services/data_service.js';
 import { getSessionTokenFromCookieHeader } from '../../utils/auth_cookies.js';
 import { getSocketClientContext } from '../../utils/client_context.js';
 import { sendSignupVerificationEmail } from '../../emails/signup_verification/index.js';
+import { consumeSocketAuthAttempt, AUTH_RATE_LIMIT_MESSAGE } from '../../middleware/rate_limit.js';
 
 const onConnection = (socket, module) => {
 	socket.on('auth:signup', async (config, ack = () => {}) => {
 		let pending = null;
 		try {
+			if (!(await consumeSocketAuthAttempt(socket))) {
+				ack({ status: 'failed', message: AUTH_RATE_LIMIT_MESSAGE });
+				return;
+			}
 			pending = await DataService.createPendingUser({
 				email: config.email,
 				name: config.name,
@@ -31,6 +36,10 @@ const onConnection = (socket, module) => {
 
 	socket.on('auth:login', async (config, ack = () => {}) => {
 		try {
+			if (!(await consumeSocketAuthAttempt(socket))) {
+				ack({ status: 'failed', message: AUTH_RATE_LIMIT_MESSAGE });
+				return;
+			}
 			const result = await DataService.login({
 				email: config.email,
 				password: config.password,
