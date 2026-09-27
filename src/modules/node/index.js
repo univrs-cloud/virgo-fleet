@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { registerFleetProxy, disconnectNodeClients } from '../../utils/node_proxy.js';
+import { registerFleetProxy, disconnectNodeClients, disconnectNodeSocketClients } from '../../utils/node_proxy.js';
 import { attachNodeAssetHandler, failPendingRequestsForNode } from '../../utils/node_assets.js';
 import { registerNodeRegistry } from '../../utils/node_registry.js';
 import { registerWebrtcSignaling, attachNodeWebrtcSignaling, closeNodeWebrtcSessions } from '../../utils/webrtc_signal.js';
@@ -345,6 +345,7 @@ class NodeModule {
 				}
 				// Every WebRTC session on this socket is dead; tell the browsers so they fall back.
 				closeNodeWebrtcSessions(nodeId, socket);
+				disconnectNodeSocketClients(socket);
 				if (this.#nodeSocketsByNodeId.get(nodeId) === socket) {
 					this.#nodeSocketsByNodeId.delete(nodeId);
 					this.#updatesByNodeId.delete(nodeId);

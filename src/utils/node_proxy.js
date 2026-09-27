@@ -147,6 +147,12 @@ function disconnectNodeClients(nodeId) {
 	clientsByNodeId.delete(nodeId);
 }
 
+function disconnectNodeSocketClients(nodeSocket) {
+	for (const clientSocket of [...(nodeSocket.data.proxySessions?.values() ?? [])]) {
+		clientSocket.disconnect(true);
+	}
+}
+
 /** Drops a single user's live proxy sessions for a node (e.g. after their access is revoked),
  * so an already-bridged session is torn down immediately instead of surviving until reconnect.
  * Their WebRTC data channel to the node (which the node only access-checks at open time) is torn
@@ -188,6 +194,7 @@ async function revokeStaleNodeAccess(userIds, nodeIds) {
 export {
 	registerFleetProxy,
 	disconnectNodeClients,
+	disconnectNodeSocketClients,
 	disconnectNodeUser,
 	revokeStaleNodeAccess
 };

@@ -30,6 +30,7 @@ const initializeSocket = (server) => {
 	io = new Server(server, {
 		path: '/api',
 		maxHttpBufferSize: 4 * 1024 * 1024,
+		cleanupEmptyChildNamespaces: true,
 		allowRequest: (request, callback) => { callback(null, isSameOrigin(request)); }
 	});
 
