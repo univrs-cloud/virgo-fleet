@@ -1,7 +1,7 @@
 import DataService from '../services/data_service.js';
 import { clearAuthCookies, getSessionTokenFromCookieHeader, setAuthCookies } from '../utils/auth_cookies.js';
 import { getRequestClientContext } from '../utils/client_context.js';
-import { sendSignupVerificationEmail } from '../emails/signup_verification/index.js';
+import { sendSignupVerificationEmail } from '../emails/signup_verification.js';
 
 async function signup(req, res) {
 	let pending = null;

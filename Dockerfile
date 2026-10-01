@@ -54,7 +54,8 @@ ENV DOMAIN="" \
     SMTP_PORT="587" \
     SMTP_SECURE="false" \
     SMTP_USER="" \
-    SMTP_FROM=""
+    SMTP_FROM="" \
+    CONTACT_EMAIL=""
 
 # Two-factor (TOTP). MFA_SECRET_KEY encrypts TOTP secrets at rest (AES-256-GCM); any string works
 # (it's hashed to a 32-byte key). Strongly recommended — without it, TOTP secrets are stored

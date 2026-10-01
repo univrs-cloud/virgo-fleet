@@ -44,15 +44,18 @@ class MailService {
 	// particular email says. Callers own the subject and body; email-type specifics live under
 	// src/emails. When only html is given, a plain-text alternative is derived from it so every
 	// message ships both parts (better deliverability) without callers maintaining two bodies.
-	static async sendEmail({ to, subject, html, text }) {
+	static async sendEmail({ to, replyTo, subject, html, text }) {
 		const { from } = this.#readSmtpConfig();
 		const textBody = text ?? (html
 			? htmlToText(html, {
 				wordwrap: false,
-				selectors: [{ selector: 'a', options: { hideLinkHrefIfSameAsText: false } }]
+				selectors: [
+					{ selector: 'a', options: { hideLinkHrefIfSameAsText: false } },
+					{ selector: 'img', format: 'skip' }
+				]
 			})
 			: undefined);
-		await this.#getTransport().sendMail({ from, to, subject, html, text: textBody });
+		await this.#getTransport().sendMail({ from, to, replyTo, subject, html, text: textBody });
 	}
 }
 

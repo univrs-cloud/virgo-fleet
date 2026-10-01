@@ -16,6 +16,7 @@ SMTP_SECURE='false'
 SMTP_USER='postmaster@your.domain'
 SMTP_PASSWORD='your-smtp-password'
 SMTP_FROM='fleet@your.domain'
+CONTACT_EMAIL='you@your.domain'
 VAPID_PUBLIC_KEY='generate-once-see-below'
 VAPID_PRIVATE_KEY='generate-once-see-below'
 VAPID_SUBJECT='mailto:fleet@your.domain'
@@ -31,6 +32,15 @@ The Cloudflare credentials issue the DNS-01 wildcard certificates for nodes on t
 token scoped to that one zone with `Zone:DNS:Edit`, and copy the zone id from the zone's overview page so
 the token needs no `Zone:Read`. A Cloudflare token cannot be scoped below a zone, which is why nodes never
 receive it and ask fleet to publish their challenge records instead.
+
+## Messages
+
+`POST /messages` emails a message written on one of our own pages. The body is JSON: `topic`, `name`, `email` and `message`. The reply is JSON too, `{ "status": "succeeded" }` or `{ "status": "failed", "message": "…" }`, with `field` naming the input a validation error is about.
+
+- Only requests whose `Origin` is `https://${DOMAIN}` or `https://fleet.${DOMAIN}` are accepted.
+- Each topic is sent to its own address from the environment. `contact` goes to `CONTACT_EMAIL`; a new topic is its own module in `src/emails/`, its template in `src/emails/templates/`, and one more entry in `src/controllers/message.js`.
+- The sender's address becomes the reply-to, so answering is a reply to the email.
+- An address can send 5 messages an hour.
 
 ## TURN server
 
@@ -212,6 +222,7 @@ services:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - SMTP_FROM=${SMTP_FROM}
+      - CONTACT_EMAIL=${CONTACT_EMAIL}
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}

@@ -40,3 +40,13 @@ export const webauthnOptionsRateLimiter = rateLimit({
 	keyGenerator: clientKey,
 	message: { status: 'failed', message: AUTH_RATE_LIMIT_MESSAGE }
 });
+
+export const messageRateLimiter = rateLimit({
+	windowMs: 60 * 60 * 1000,
+	max: 5,
+	standardHeaders: true,
+	legacyHeaders: false,
+	skipFailedRequests: true,
+	keyGenerator: clientKey,
+	message: { status: 'failed', message: 'Too many messages, please try again later.' }
+});

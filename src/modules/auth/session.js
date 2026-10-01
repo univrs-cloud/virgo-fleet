@@ -1,7 +1,7 @@
 import DataService from '../../services/data_service.js';
 import { getSessionTokenFromCookieHeader } from '../../utils/auth_cookies.js';
 import { getSocketClientContext } from '../../utils/client_context.js';
-import { sendSignupVerificationEmail } from '../../emails/signup_verification/index.js';
+import { sendSignupVerificationEmail } from '../../emails/signup_verification.js';
 import { consumeSocketAuthAttempt, AUTH_RATE_LIMIT_MESSAGE } from '../../middleware/rate_limit.js';
 
 const onConnection = (socket, module) => {

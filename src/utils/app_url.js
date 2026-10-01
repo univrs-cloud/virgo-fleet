@@ -23,3 +23,8 @@ export function getAppUrl() {
 	const host = getAppHost();
 	return host ? `https://${host}` : '';
 }
+
+export function getSiteUrl() {
+	const domain = getDomain();
+	return domain ? `https://${domain}` : '';
+}
