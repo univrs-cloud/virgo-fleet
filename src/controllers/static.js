@@ -17,6 +17,7 @@ const staticMiddleware = express.static(folderPath, {
 // Absolute targets so a node view (served under /nodes/:id/) still loads these from the fleet origin
 // rather than proxying them through the node.
 const FLEET_SHELL_SUBSTITUTIONS = [
+	['assets/img/univrs.svg', '/assets/img/fleet.svg'],
 	['assets/img/virgo.svg', '/assets/img/fleet.svg'],
 	['assets/icons/icon_192x192.png', '/assets/fleet-icons/icon_192x192.png']
 ];
