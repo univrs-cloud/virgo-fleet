@@ -69,13 +69,15 @@ function setAuthCookies(res, req, { token, user, mfaState = 'satisfied' }) {
 	const account = buildAccountFromUser(user, mfaState);
 	// The session token is the credential — keep it httpOnly so page scripts (and any XSS) can't
 	// read it. The account cookie is display-only and must stay readable by the UI.
-	res.cookie('virgo.session', token, getCookieOptions(req, { httpOnly: true }));
+	res.cookie(SESSION_COOKIE, token, getCookieOptions(req, { httpOnly: true }));
 	res.cookie(ACCOUNT_COOKIE, serializeAccount(account), getCookieOptions(req));
+	res.cookie('account', serializeAccount(account), getCookieOptions(req));
 }
 
 function clearAuthCookies(res, req) {
-	res.cookie('virgo.session', '', getCookieOptions(req, { httpOnly: true }));
+	res.cookie(SESSION_COOKIE, '', getCookieOptions(req, { httpOnly: true }));
 	res.cookie(ACCOUNT_COOKIE, '', getCookieOptions(req));
+	res.cookie('account', '', getCookieOptions(req));
 }
 
 export {
