@@ -2,6 +2,7 @@
 // expire together (both 30 days).
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const SESSION_COOKIE = 'virgo.session';
+const ACCOUNT_COOKIE = 'account_fleet';
 
 function parseCookieHeader(cookieHeader, name) {
 	if (!cookieHeader) {
@@ -69,12 +70,12 @@ function setAuthCookies(res, req, { token, user, mfaState = 'satisfied' }) {
 	// The session token is the credential — keep it httpOnly so page scripts (and any XSS) can't
 	// read it. The account cookie is display-only and must stay readable by the UI.
 	res.cookie('virgo.session', token, getCookieOptions(req, { httpOnly: true }));
-	res.cookie('account', serializeAccount(account), getCookieOptions(req));
+	res.cookie(ACCOUNT_COOKIE, serializeAccount(account), getCookieOptions(req));
 }
 
 function clearAuthCookies(res, req) {
 	res.cookie('virgo.session', '', getCookieOptions(req, { httpOnly: true }));
-	res.cookie('account', '', getCookieOptions(req));
+	res.cookie(ACCOUNT_COOKIE, '', getCookieOptions(req));
 }
 
 export {
