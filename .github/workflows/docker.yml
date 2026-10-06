@@ -15,6 +15,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/checkout@v4
+        with:
+          repository: univrs-cloud/virgo-ui
+          ref: main
+          path: virgo-ui
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - run: npm ci
+        working-directory: virgo-ui
+
+      - run: npm run build
+        working-directory: virgo-ui
+
       - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
@@ -28,6 +44,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          build-contexts: |
+            ui=virgo-ui/dist
           push: ${{ github.event_name == 'push' }}
           platforms: linux/amd64,linux/arm64
           provenance: false
