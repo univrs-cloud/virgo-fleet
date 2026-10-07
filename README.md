@@ -237,7 +237,7 @@ services:
       - "traefik.http.routers.fleet.rule=Host(`fleet.${DOMAIN}`)"
       - "traefik.http.routers.fleet.entrypoints=https"
       - "traefik.http.routers.fleet.tls.certresolver=${CERTRESOLVER:+${CERTRESOLVER}}"
-      - "traefik.http.routers.fleet.middlewares=secure-headers@file"
+      - "traefik.http.routers.fleet.middlewares=security-headers@file"
     networks:
       - internal
       - virgo
