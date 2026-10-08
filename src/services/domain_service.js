@@ -77,6 +77,7 @@ class DomainService {
 
 	static async leaveCluster(membership) {
 		const cluster = membership.Cluster;
+		await CloudflareService.deleteRecords(Object.values(membership.recordIds || {}));
 		await membership.destroy();
 		if (!await ClusterMember.count({ where: { clusterId: cluster.id } })) {
 			await CloudflareService.deleteRecords(Object.values(cluster.recordIds || {}));
@@ -157,7 +158,7 @@ class DomainService {
 		return { available: false, reason: 'taken' };
 	}
 
-	static async claim({ nodeId, hostname, domainName, address, publicIp }) {
+	static async claim({ nodeId, hostname, domainName, address, nodeAddress, publicIp }) {
 		const zone = this.getZone();
 		if (!zone) {
 			console.warn(`[domains] ${nodeId}: no CLOUDFLARE_ZONE configured, skipping claim.`);
@@ -196,6 +197,7 @@ class DomainService {
 		}
 
 		const probed = (this.isPublicAddress(address) ? 'public' : await this.probeTarget(nodeFqdn, publicIp));
+		const promoted = Boolean(cluster) && cluster.target !== 'public' && probed === 'public';
 		if (!cluster) {
 			const node = await Node.findOne({ where: { nodeId }, attributes: ['ownerUserId'] });
 			cluster = await Cluster.create({ label, fqdn, ownerUserId: (node?.ownerUserId ?? null), lanIp: (address || null), publicIp: (this.isPublicAddress(publicIp) ? publicIp : null), target: probed });
@@ -207,14 +209,49 @@ class DomainService {
 		}
 
 		if (!joined) {
-			await ClusterMember.create({ clusterId: cluster.id, nodeId });
+			await ClusterMember.create({ clusterId: cluster.id, nodeId, lanIp: (nodeAddress || null) });
+		} else if (membership.lanIp !== (nodeAddress || null)) {
+			membership.lanIp = (nodeAddress || null);
+			await membership.save();
+		}
+
+		if (promoted) {
+			await this.syncOtherMembers(cluster, nodeId);
 		}
 
 		return cluster;
 	}
 
+	static async syncMemberRecords(membership, domain) {
+		const identifier = await this.getIdentifier(membership.nodeId);
+		const nodeFqdn = (identifier?.fqdn === domain.fqdn && identifier.nodeFqdn !== domain.fqdn ? identifier.nodeFqdn : null);
+		const address = (domain.target === 'public' ? (domain.publicIp || membership.lanIp) : membership.lanIp);
+		const recordIds = {};
+		if (nodeFqdn && membership.lanIp && address) {
+			for (const [key, name] of Object.entries({ node: nodeFqdn, wildcard: `*.${nodeFqdn}` })) {
+				await this.replaceConflicting(name, 'A');
+				recordIds[key] = await CloudflareService.upsertA(name, address);
+			}
+
+			console.log(`[domains] ${nodeFqdn} and *.${nodeFqdn} point at ${address} (${domain.target}).`);
+		}
+
+		const kept = Object.values(recordIds);
+		await CloudflareService.deleteRecords(Object.values(membership.recordIds || {}).filter((id) => { return !kept.includes(id); }));
+		membership.recordIds = recordIds;
+		await membership.save();
+	}
+
+	static async syncOtherMembers(domain, nodeId) {
+		const members = await ClusterMember.findAll({ where: { clusterId: domain.id, nodeId: { [Op.ne]: nodeId } } });
+		for (const member of members) {
+			await this.syncMemberRecords(member, domain);
+		}
+	}
+
 	static async syncRecords(nodeId, publicIp) {
-		const domain = (await this.getMembership(nodeId))?.Cluster;
+		const membership = await this.getMembership(nodeId);
+		const domain = membership?.Cluster;
 		if (!domain) {
 			return null;
 		}
@@ -228,6 +265,8 @@ class DomainService {
 			console.warn(`[domains] ${nodeId}: no address reported, ${domain.fqdn} has no A records.`);
 			return domain;
 		}
+
+		await this.syncMemberRecords(membership, domain);
 
 		const wildcard = `*.${domain.fqdn}`;
 		await this.replaceConflicting(wildcard, 'A');
@@ -277,6 +316,7 @@ class DomainService {
 		domain.target = target;
 		domain.publicIp = publicIp;
 		await domain.save();
+		await this.syncOtherMembers(domain, nodeId);
 		return this.syncRecords(nodeId, publicIp);
 	}
 

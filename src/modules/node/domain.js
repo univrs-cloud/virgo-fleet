@@ -9,7 +9,7 @@ const onConnection = (socket, module) => {
 		return;
 	}
 
-	socket.on('node:domain:claim', async ({ hostname, domainName, address } = {}, ack = () => {}) => {
+	socket.on('node:domain:claim', async ({ hostname, domainName, address, nodeAddress } = {}, ack = () => {}) => {
 		if (!socket.data?.nodeId) {
 			ack({ status: 'failed', message: 'Unauthorized' });
 			return;
@@ -19,7 +19,7 @@ const onConnection = (socket, module) => {
 		try {
 			await module.setNodeIdentifier(socket.data.nodeId, { name: hostname, domainName });
 			const publicIp = getSocketClientAddress(socket);
-			const domain = await DomainService.claim({ nodeId: socket.data.nodeId, hostname, domainName, address, publicIp });
+			const domain = await DomainService.claim({ nodeId: socket.data.nodeId, hostname, domainName, address, nodeAddress, publicIp });
 			if (domain) {
 				await DomainService.syncRecords(socket.data.nodeId, publicIp);
 			}

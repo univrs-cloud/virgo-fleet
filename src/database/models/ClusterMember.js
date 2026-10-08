@@ -15,6 +15,15 @@ const ClusterMember = sequelize.define('ClusterMember', {
 		type: DataTypes.STRING,
 		allowNull: false,
 		unique: true
+	},
+	lanIp: {
+		type: DataTypes.STRING,
+		allowNull: true
+	},
+	recordIds: {
+		type: DataTypes.JSONB,
+		allowNull: false,
+		defaultValue: {}
 	}
 }, {
 	tableName: 'cluster_members'

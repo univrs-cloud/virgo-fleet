@@ -29,6 +29,7 @@ const onConnection = (socket, module) => {
 			const hostname = String(config?.hostname || '').trim() || name;
 			const domainName = String(config?.domainName || '').trim();
 			const address = String(config?.address || '').trim();
+			const nodeAddress = String(config?.nodeAddress || '').trim();
 			const email = String(config?.email || '').trim().toLowerCase();
 			const password = String(config?.password || '');
 			if (!nodeId || !email || !password) {
@@ -61,7 +62,7 @@ const onConnection = (socket, module) => {
 				role: 'owner'
 			});
 			const publicIp = getSocketClientAddress(socket);
-			const domain = await DomainService.claim({ nodeId, hostname, domainName, address, publicIp });
+			const domain = await DomainService.claim({ nodeId, hostname, domainName, address, nodeAddress, publicIp });
 			if (domain) {
 				await DomainService.syncRecords(nodeId, publicIp);
 			}
