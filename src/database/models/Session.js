@@ -24,8 +24,8 @@ const Session = sequelize.define('Session', {
 		allowNull: false,
 		defaultValue: 'satisfied'
 	},
-	// Captured at sign-in and never updated — they describe where the session came from, not the
-	// latest request. Null on sessions that predate the profile's session list.
+	// Captured at sign-in and refreshed with lastSeenAt, so they describe where the session is being
+	// used from now. Null on sessions that predate the profile's session list.
 	ipAddress: {
 		type: DataTypes.STRING,
 		allowNull: true

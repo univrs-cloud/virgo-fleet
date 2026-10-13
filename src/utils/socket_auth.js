@@ -1,5 +1,6 @@
 import DataService from '../services/data_service.js';
 import { getSessionTokenFromCookieHeader } from './auth_cookies.js';
+import { getSocketClientContext } from './client_context.js';
 import * as sessionSockets from './session_sockets.js';
 
 async function applyFleetUserSession(socket, sessionToken) {
@@ -18,7 +19,7 @@ async function applyFleetUserSession(socket, sessionToken) {
 	// Bound here because every namespace authenticates through this function; revoking a session
 	// then drops its live connections instead of waiting for them to reconnect.
 	sessionSockets.track(socket, session.id, session.expiresAt);
-	DataService.touchSession(sessionToken).catch((error) => {
+	DataService.touchSession(sessionToken, getSocketClientContext(socket)).catch((error) => {
 		console.error('Failed to record fleet session activity:', error);
 	});
 	return true;

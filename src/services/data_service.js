@@ -241,7 +241,7 @@ class DataService {
 
 	/** Called from the cookie middleware and socket auth, so it runs on every request — the
 	 * in-process throttle is what keeps that from becoming a query per request. */
-	static async touchSession(token) {
+	static async touchSession(token, context = {}) {
 		if (!token) {
 			return;
 		}
@@ -251,7 +251,14 @@ class DataService {
 		}
 		sessionTouchedAt.set(token, now);
 		pruneSessionTouches();
-		await Session.update({ lastSeenAt: new Date(now) }, { where: { token } });
+		const values = { lastSeenAt: new Date(now) };
+		if (context.ipAddress) {
+			values.ipAddress = context.ipAddress;
+		}
+		if (context.userAgent) {
+			values.userAgent = context.userAgent;
+		}
+		await Session.update(values, { where: { token } });
 	}
 
 	/** The user's own live sessions, most recently active first. Rows are addressed by id — the

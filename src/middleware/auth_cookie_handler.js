@@ -4,6 +4,7 @@ import {
 	getSessionTokenFromCookieHeader,
 	setAuthCookies
 } from '../utils/auth_cookies.js';
+import { getRequestClientContext } from '../utils/client_context.js';
 
 /**
  * Sets the account cookie from a valid virgo.session cookie issued by fleet login. Fleet is
@@ -17,7 +18,7 @@ export default async (req, res, next) => {
 			const session = await DataService.getSessionByToken(sessionToken);
 			if (session?.User) {
 				// Not awaited: the write is throttled server-side and no response should wait on it.
-				DataService.touchSession(sessionToken).catch((error) => {
+				DataService.touchSession(sessionToken, getRequestClientContext(req)).catch((error) => {
 					console.error('Failed to record fleet session activity:', error);
 				});
 				// Carry the session's MFA state onto the refreshed cookie — otherwise this per-request
