@@ -44,7 +44,7 @@ const SESSION_ACTIVITY_THROTTLE_MS = 1000 * 60;
 const SESSION_TOUCH_CACHE_LIMIT = 5000;
 // Last write per token. Swept only once it outgrows the sessions a fleet realistically has open;
 // losing an entry costs one extra write, nothing more.
-const sessionTouchedAt = new Map();
+const sessionTouches = new Map();
 
 // Every session change refreshes that user's own sockets and nobody else's; the sessions plugin
 // listens. Emitted from here so no sign-in, sign-out or revoke path can forget to.
@@ -70,13 +70,13 @@ async function destroySessions(where, transaction) {
 }
 
 function pruneSessionTouches() {
-	if (sessionTouchedAt.size <= SESSION_TOUCH_CACHE_LIMIT) {
+	if (sessionTouches.size <= SESSION_TOUCH_CACHE_LIMIT) {
 		return;
 	}
 	const cutoff = Date.now() - SESSION_ACTIVITY_THROTTLE_MS;
-	for (const [token, touchedAt] of sessionTouchedAt) {
-		if (touchedAt < cutoff) {
-			sessionTouchedAt.delete(token);
+	for (const [token, touch] of sessionTouches) {
+		if (touch.at < cutoff) {
+			sessionTouches.delete(token);
 		}
 	}
 }
@@ -246,10 +246,12 @@ class DataService {
 			return;
 		}
 		const now = Date.now();
-		if (now - (sessionTouchedAt.get(token) ?? 0) < SESSION_ACTIVITY_THROTTLE_MS) {
+		const touch = sessionTouches.get(token);
+		const hasMoved = Boolean(context.ipAddress) && touch?.ipAddress !== context.ipAddress;
+		if (!hasMoved && now - (touch?.at ?? 0) < SESSION_ACTIVITY_THROTTLE_MS) {
 			return;
 		}
-		sessionTouchedAt.set(token, now);
+		sessionTouches.set(token, { at: now, ipAddress: context.ipAddress ?? touch?.ipAddress });
 		pruneSessionTouches();
 		const values = { lastSeenAt: new Date(now) };
 		if (context.ipAddress) {
@@ -258,7 +260,10 @@ class DataService {
 		if (context.userAgent) {
 			values.userAgent = context.userAgent;
 		}
-		await Session.update(values, { where: { token } });
+		const [, sessions] = await Session.update(values, { where: { token }, returning: true });
+		if (hasMoved) {
+			emitSessionsUpdated(sessions?.[0]?.userId);
+		}
 	}
 
 	static async markSessionSeen(sessionId) {
