@@ -30,7 +30,12 @@ function untrack(socket) {
 	tracked.delete(socket);
 	if (!tracked.size) {
 		forget(sessionId);
+		eventEmitter.emit('sessions:connection', { sessionId, userId: socket.userId, connected: false });
 	}
+}
+
+function isConnected(sessionId) {
+	return socketsBySessionId.has(sessionId);
 }
 
 function close(socket) {
@@ -86,6 +91,9 @@ function track(socket, sessionId, expiresAt) {
 	const sockets = socketsBySessionId.get(sessionId) ?? new Set();
 	sockets.add(socket);
 	socketsBySessionId.set(sessionId, sockets);
+	if (sockets.size === 1) {
+		eventEmitter.emit('sessions:connection', { sessionId, userId: socket.userId, connected: true });
+	}
 	if (expiresAt) {
 		expiresAtBySessionId.set(sessionId, new Date(expiresAt).getTime());
 	}
@@ -113,5 +121,6 @@ function disconnectSessions(sessionIds) {
 export {
 	track,
 	untrack,
+	isConnected,
 	disconnectSessions
 };

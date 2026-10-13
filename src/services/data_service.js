@@ -261,6 +261,10 @@ class DataService {
 		await Session.update(values, { where: { token } });
 	}
 
+	static async markSessionSeen(sessionId) {
+		await Session.update({ lastSeenAt: new Date() }, { where: { id: sessionId } });
+	}
+
 	/** The user's own live sessions, most recently active first. Rows are addressed by id — the
 	 * token never leaves the server. */
 	static async listSessions(userId) {

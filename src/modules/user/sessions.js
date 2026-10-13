@@ -12,7 +12,7 @@ const emitSessions = async (socket) => {
 	try {
 		const sessions = await DataService.listSessions(socket.userId);
 		socket.emit('user:sessions', sessions.map((session) => {
-			return { ...session, current: session.id === socket.sessionId };
+			return { ...session, current: session.id === socket.sessionId, connected: sessionSockets.isConnected(session.id) };
 		}));
 	} catch (error) {
 		console.error('Error emitting sessions:', error);
@@ -41,6 +41,17 @@ const register = (module) => {
 			sessionSockets.disconnectSessions(sessionIds ?? []);
 		} catch (error) {
 			console.error('Error disconnecting revoked sessions:', error);
+		}
+	});
+
+	module.eventEmitter.on('sessions:connection', async ({ sessionId, userId, connected } = {}) => {
+		try {
+			if (!connected) {
+				await DataService.markSessionSeen(sessionId);
+			}
+			await broadcastSessions(module, userId);
+		} catch (error) {
+			console.error('Error updating session connection:', error);
 		}
 	});
 
