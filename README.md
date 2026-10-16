@@ -2,8 +2,9 @@
 
 .env
 ```
-CERTRESOLVER='le'
 DOMAIN='your.domain'
+CERTRESOLVER='le'
+APP_DIR='/messier/apps/fleet'
 DB_PASSWORD='your-db-password'
 MFA_SECRET_KEY='a-long-random-string'
 TURN_SECRET_KEY='a-long-random-string'
@@ -257,7 +258,7 @@ services:
       - POSTGRES_USER=${DB_USER:-fleet}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
-      - /messier/apps/fleet/db:/var/lib/postgresql
+      - ${APP_DIR:-/messier/apps/fleet}/db:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-fleet} -d ${DB_NAME:-fleet}"]
       interval: 5s
@@ -296,7 +297,7 @@ services:
       - --no-software-attribute
       - --log-file=stdout
     volumes:
-      - /messier/apps/fleet/coturn:/var/lib/coturn
+      - ${APP_DIR:-/messier/apps/fleet}/coturn:/var/lib/coturn
     restart: unless-stopped
 
 networks:
