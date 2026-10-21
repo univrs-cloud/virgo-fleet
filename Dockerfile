@@ -16,7 +16,7 @@ COPY --from=ui . /var/www/virgo-ui/app/dist
 
 WORKDIR /var/www/virgo-api/app
 
-COPY package*.json ./
+COPY package*.json .npmrc ./
 RUN npm ci --omit=dev
 
 COPY . .
