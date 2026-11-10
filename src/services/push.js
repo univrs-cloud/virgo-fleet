@@ -1,4 +1,4 @@
-import webpush from 'web-push';
+import * as webpush from 'web-push';
 import DataService from './data_service.js';
 
 // VAPID keypair is provided via the environment (see Dockerfile / README) and generated once — the

@@ -18,22 +18,22 @@
 		"arm64"
 	],
 	"dependencies": {
-		"@simplewebauthn/server": "^14.0.3",
+		"@simplewebauthn/server": "^14.1.0",
 		"bcryptjs": "^3.0.3",
 		"compression": "^1.8.2",
-		"dotenv": "^18.0.9",
+		"dotenv": "^18.0.10",
 		"express": "^5.3.0",
-		"express-rate-limit": "^8.7.3",
+		"express-rate-limit": "^8.7.4",
 		"express-validator": "^7.3.2",
 		"helmet": "^8.3.0",
 		"html-to-text": "^10.0.1",
-		"nodemailer": "^10.3.1",
+		"nodemailer": "^10.5.0",
 		"otplib": "^13.6.0",
 		"pg": "^8.23.1",
 		"pg-hstore": "^2.3.4",
 		"sequelize": "^6.37.8",
 		"socket.io": "^4.8.4",
-		"web-push": "^3.6.7"
+		"web-push": "^4.0.0"
 	},
 	"overrides": {
 		"glob": "^13.0.0",
