@@ -4,7 +4,7 @@ import crypto from 'crypto';
 // reached directly; a node behind CGNAT is reached through coturn, which fleet runs as its own
 // sidecar (see the README). coturn is configured with `use-auth-secret`, so credentials are not
 // stored per user — fleet derives a short-lived one from the shared secret on demand and hands it
-// to both peers in the signaling exchange. The TTL only has to cover ICE establishment; once a
+// to the browser in the signaling exchange. The TTL only has to cover ICE establishment; once a
 // relay allocation is bound it lives for the session.
 
 const DEFAULT_LISTENING_PORT = 3477;

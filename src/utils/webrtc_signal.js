@@ -47,32 +47,6 @@ const transitionSession = (session, nextState) => {
 	return true;
 };
 
-const CANDIDATE_PATTERN = /^(?:a=)?candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ /i;
-const LAN_PATTERNS = [
-	/^0\./,
-	/^10\./,
-	/^127\./,
-	/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
-	/^169\.254\./,
-	/^172\.(1[6-9]|2\d|3[01])\./,
-	/^192\.168\./,
-	/^::1$/,
-	/^f[cd]/i,
-	/^fe80:/i
-];
-
-const isLanCandidate = (candidate) => {
-	const address = CANDIDATE_PATTERN.exec(String(candidate || '').trim())?.[1];
-	return Boolean(address) && LAN_PATTERNS.some((pattern) => { return pattern.test(address.replace(/^::ffff:/i, '')); });
-};
-
-const withoutLanCandidates = (sdp) => {
-	if (typeof sdp !== 'string') {
-		return sdp;
-	}
-	return sdp.split(/\r?\n/).filter((line) => { return !isLanCandidate(line); }).join('\r\n');
-};
-
 const sessionRequestLimiter = createRateLimiter({ windowMs: SESSION_REQUEST_WINDOW_MS, max: 60 });
 
 // sessionId -> { clientSocket, nodeSocket, nodeId, userId, state, negotiationTimer, orphanTimer }
@@ -262,10 +236,6 @@ const attachNodeWebrtcSignaling = (nodeSocket) => {
 					return;
 				}
 				transitionSession(session, SESSION_STATE.ANSWERED);
-				rest.sdp = withoutLanCandidates(rest.sdp);
-			}
-			if (event === 'webrtc:candidate' && isLanCandidate(rest.candidate?.candidate)) {
-				return;
 			}
 			session.clientSocket.emit(event, { sessionId, ...rest });
 			if (event === 'webrtc:close' || event === 'webrtc:error') {
@@ -378,7 +348,7 @@ const handleSessionRequest = async (clientSocket, nodeId, ack) => {
 	indexAdd(sessionsByUserId, clientSocket.userId, sessionId);
 	indexAdd(sessionsByClient, clientSocket, sessionId);
 
-	nodeSocket.emit('webrtc:open', { sessionId, token, iceServers: servers });
+	nodeSocket.emit('webrtc:open', { sessionId, token, iceServers: servers.filter((server) => { return !server.credential; }) });
 	transitionSession(session, SESSION_STATE.OPEN_SENT);
 	session.negotiationTimer = setTimeout(() => {
 		const current = sessions.get(sessionId);
@@ -425,13 +395,13 @@ const registerWebrtcSignaling = (io) => {
 			const session = sessions.get(sessionId);
 			if (session?.clientSocket === clientSocket && session.state === SESSION_STATE.OPEN_SENT) {
 				transitionSession(session, SESSION_STATE.OFFER_RECEIVED);
-				tellSessionNode(session, 'webrtc:offer', { sessionId, sdp: withoutLanCandidates(sdp), token });
+				tellSessionNode(session, 'webrtc:offer', { sessionId, sdp, token });
 			}
 		});
 
 		clientSocket.on('webrtc:candidate', ({ sessionId, candidate } = {}) => {
 			const session = sessions.get(sessionId);
-			if (session?.clientSocket === clientSocket && !isLanCandidate(candidate?.candidate)) {
+			if (session?.clientSocket === clientSocket) {
 				tellSessionNode(session, 'webrtc:candidate', { sessionId, candidate });
 			}
 		});
