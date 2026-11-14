@@ -79,6 +79,15 @@ its allowed-peer list (`Whitelisting external-ip private part` in the log), whic
 `--denied-peer-ip` entry covering the host's own LAN and turns the relay into a path to every
 service on it. Pinning gives the same precision without that.
 
+The pinning still has one consequence: with `--external-ip` and `--relay-ip` both set, coturn
+rewrites any peer address equal to `TURN_EXTERNAL_IP` to `TURN_INTERNAL_IP`. When both ends hold an
+allocation (a phone on mobile data and a node behind CGNAT), each one's peer is the other's relay,
+so that rewritten address is coturn itself, and the `192.168.0.0/16` deny refuses it: the session
+never connects and the log repeats `A peer IP <TURN_INTERNAL_IP> denied` on every retry.
+`--allowed-peer-ip=${TURN_INTERNAL_IP}` lets the two allocations reach each other, and the `OUTPUT`
+rules under **Firewall** fence it to the relay port range, so it opens nothing else on the host.
+Never set the allow without those rules.
+
 coturn holds no certificate of its own and terminates no TLS — the optional `turns` leg above is
 terminated by Traefik and reaches coturn as plain TURN/TCP.
 coturn runs on **host networking** rather than publishing ports: a TURN relay binds a fresh UDP
@@ -159,8 +168,9 @@ free — the browser gathers against it and waits out the timeout before ICE com
 
 The relay is reachable by any signed-in fleet user (they read a 300s credential out of their
 session ack), so `--denied-peer-ip` blocks the RFC1918 ranges **and loopback** — nodes are relayed
-to on public addresses, so this costs nothing and keeps the relay from being an open path into the
-docker networks, the host LAN, or anything bound to `127.0.0.1`. coturn does not deny loopback on
+to on public addresses, so this keeps the relay from being an open path into the docker networks,
+the host LAN, or anything bound to `127.0.0.1`. The one exception is coturn's own
+`TURN_INTERNAL_IP`, allowed for relay-to-relay and fenced by the `OUTPUT` rules below. coturn does not deny loopback on
 its own, and host networking puts the host's own loopback services one `CreatePermission` away, so
 that entry is as load-bearing as the RFC1918 ones.
 
@@ -203,6 +213,15 @@ sudo netfilter-persistent save
 A `RELATED,ESTABLISHED` rule does not cover the relay range: those ports are inbound-first, so the
 peer's first connectivity check is `NEW` and hits the drop. A cloud security group, if the host has
 one, needs all three too.
+
+Required on every host, whatever its `INPUT` policy: the fence for `--allowed-peer-ip`. coturn runs
+as `nobody` (uid 65534), so these match only its traffic to its own address and let it reach nothing
+there but the relay range. Use your `TURN_INTERNAL_IP` and port range:
+```
+sudo iptables -A OUTPUT -d 192.168.100.2 -m owner --uid-owner 65534 -p udp --dport 61000:61500 -j ACCEPT
+sudo iptables -A OUTPUT -d 192.168.100.2 -m owner --uid-owner 65534 -j DROP
+sudo netfilter-persistent save
+```
 
 Each connected node holds a control socket open, so the default 1024 fd limit is exhausted well
 before a few hundred nodes (plus proxied user sessions); the fleet service raises `nofile` to keep
@@ -299,6 +318,7 @@ services:
       - --denied-peer-ip=172.16.0.0-172.31.255.255
       - --denied-peer-ip=192.168.0.0-192.168.255.255
       - --denied-peer-ip=224.0.0.0-255.255.255.255
+      - --allowed-peer-ip=${TURN_INTERNAL_IP}
       - --external-ip=${TURN_EXTERNAL_IP}
       - --no-software-attribute
       - --log-file=stdout
