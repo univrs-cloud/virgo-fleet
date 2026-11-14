@@ -397,7 +397,7 @@ const handleSessionRequest = async (clientSocket, nodeId, ack) => {
 	indexAdd(sessionsByUserId, clientSocket.userId, sessionId);
 	indexAdd(sessionsByClient, clientSocket, sessionId);
 
-	nodeSocket.emit('webrtc:open', { sessionId, token, iceServers: servers.filter((server) => { return !server.credential; }) });
+	nodeSocket.emit('webrtc:open', { sessionId, token, iceServers: servers });
 	transitionSession(session, SESSION_STATE.OPEN_SENT);
 	session.negotiationTimer = setTimeout(() => {
 		const current = sessions.get(sessionId);

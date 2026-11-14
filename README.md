@@ -54,10 +54,11 @@ channel that fails to establish all transparently keep using the Socket.IO proxy
 The relay only carries sessions where **neither** peer can be reached directly. A node behind CGNAT
 usually still connects directly when the admin's own NAT is endpoint-independent, so the relay is
 for both-ends-symmetric and UDP-blocked networks. The browser receives the UDP and TCP TURN URLs
-(and the `turns` one when `TURN_TLS_PORT` is set). The node receives only the STUN URL: one relayed
-end is enough, and a node holding its own allocation makes ICE pair the two relay addresses, which
-coturn maps from `TURN_EXTERNAL_IP` back to its own LAN address and denies (`A peer IP ... denied`
-in its log). So a UDP-blocked browser can use TURN/TCP, while a UDP-blocked node remains on Socket.IO.
+(and the `turns` one when `TURN_TLS_PORT` is set), but the node deliberately keeps only UDP: the
+packaged `node-datachannel` uses libjuice, whose TURN control over TCP/TLS needs a libnice build. So
+a UDP-blocked browser can use TURN/TCP, while a UDP-blocked node remains on Socket.IO. The node needs
+its own allocation even next to the browser: its firewall drops unsolicited UDP and the browser hides
+its LAN address behind an mDNS name, so a browser on the node's LAN gets in through the node's relay.
 
 Fleet passes LAN candidates on only when the browser and the node reach fleet from the same address
 (or both from fleet's own network). Across networks a LAN candidate can never connect, and the
