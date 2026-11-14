@@ -47,7 +47,7 @@ const transitionSession = (session, nextState) => {
 	return true;
 };
 
-const CANDIDATE_PATTERN = /^(?:a=)?candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ /i;
+const CANDIDATE_PATTERN = /^(?:a=)?candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ (\S+)/i;
 const LAN_PATTERNS = [
 	/^0\./,
 	/^10\./,
@@ -72,6 +72,11 @@ const isLanAddress = (address) => {
 const isLanCandidate = (candidate) => {
 	const address = CANDIDATE_PATTERN.exec(String(candidate || '').trim())?.[1];
 	return Boolean(address) && isLanAddress(address);
+};
+
+const isLanReflexiveCandidate = (candidate) => {
+	const [, address, type] = CANDIDATE_PATTERN.exec(String(candidate || '').trim()) ?? [];
+	return ['srflx', 'prflx'].includes(String(type).toLowerCase()) && isLanAddress(address);
 };
 
 const sharesNetwork = (session) => {
@@ -450,7 +455,7 @@ const registerWebrtcSignaling = (io) => {
 
 		clientSocket.on('webrtc:candidate', ({ sessionId, candidate } = {}) => {
 			const session = sessions.get(sessionId);
-			if (session?.clientSocket === clientSocket && (!isLanCandidate(candidate?.candidate) || sharesNetwork(session))) {
+			if (session?.clientSocket === clientSocket && !isLanReflexiveCandidate(candidate?.candidate) && (!isLanCandidate(candidate?.candidate) || sharesNetwork(session))) {
 				tellSessionNode(session, 'webrtc:candidate', { sessionId, candidate });
 			}
 		});

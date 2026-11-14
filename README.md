@@ -62,7 +62,10 @@ its LAN address behind an mDNS name, so a browser on the node's LAN gets in thro
 
 Fleet passes LAN candidates on only when the browser and the node reach fleet from the same address
 (or both from fleet's own network). Across networks a LAN candidate can never connect, and the
-browser would still ask coturn to relay to it, which `--denied-peer-ip` refuses with a log line.
+browser would still ask coturn to relay to it, which `--denied-peer-ip` refuses with a log line. A
+browser's server-reflexive candidate with a LAN address is dropped always: it only appears when the
+browser shares fleet's network and its STUN request hairpins through the router, so the address is
+the router's, never the browser's.
 
 `coturn` runs as its own container in the compose stack — not inside the fleet image (a crash there
 would take the app down and relay bandwidth would contend with the signaling loop). It uses
