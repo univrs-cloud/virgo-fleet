@@ -59,6 +59,10 @@ end is enough, and a node holding its own allocation makes ICE pair the two rela
 coturn maps from `TURN_EXTERNAL_IP` back to its own LAN address and denies (`A peer IP ... denied`
 in its log). So a UDP-blocked browser can use TURN/TCP, while a UDP-blocked node remains on Socket.IO.
 
+Fleet passes LAN candidates on only when the browser and the node reach fleet from the same address
+(or both from fleet's own network). Across networks a LAN candidate can never connect, and the
+browser would still ask coturn to relay to it, which `--denied-peer-ip` refuses with a log line.
+
 `coturn` runs as its own container in the compose stack — not inside the fleet image (a crash there
 would take the app down and relay bandwidth would contend with the signaling loop). It uses
 `use-auth-secret`: fleet derives a short-lived credential from `TURN_SECRET_KEY` per session, so nothing
