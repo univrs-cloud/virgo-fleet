@@ -486,7 +486,7 @@ class DataService {
 	}
 
 	/** Finish enrollment: verify the attestation, store the credential, and flip the account flag
-	 * that tells the UI (via the account cookie) that biometric sign-in is available. */
+	 * that tells the UI (via the account cookie) that passkey sign-in is available. */
 	static async completePasskeyRegistration({ userId, challengeId, response }) {
 		const pending = await this.consumeWebauthnChallenge(challengeId, 'registration');
 		if (!pending || pending.userId !== userId) {
@@ -551,7 +551,7 @@ class DataService {
 		return { ...session, mfaState: 'satisfied', user };
 	}
 
-	/** Turn biometric sign-in off for the whole account. Every credential goes, on every device —
+	/** Turn passkey sign-in off for the whole account. Every credential goes, on every device —
 	 * this is also the lost-device switch, so leaving one behind would defeat the point. */
 	static async disablePasskeys(userId) {
 		await sequelize.transaction(async (transaction) => {
