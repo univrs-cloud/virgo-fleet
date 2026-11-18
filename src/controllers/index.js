@@ -6,6 +6,7 @@ import * as messageController from './message.js';
 import * as nodeContentController from './node_content.js';
 import * as pushController from './push.js';
 import * as webauthnController from './webauthn.js';
+import * as biometricController from './biometric.js';
 
 const router = express.Router();
 
@@ -40,6 +41,11 @@ router.post('/auth/webauthn/register/verify', webauthnController.registerVerify)
 router.post('/auth/webauthn/options', webauthnController.authenticateOptions);
 router.post('/auth/webauthn/verify', webauthnController.authenticateVerify);
 router.post('/auth/webauthn/disable', webauthnController.disable);
+router.post('/auth/biometric/register/options', biometricController.registerOptions);
+router.post('/auth/biometric/register/verify', biometricController.registerVerify);
+router.post('/auth/biometric/options', biometricController.authenticateOptions);
+router.post('/auth/biometric/verify', biometricController.authenticateVerify);
+router.post('/auth/biometric/disable', biometricController.disable);
 router.post('/messages', messageController.send);
 router.get('/push/vapid-public-key', pushController.getVapidKey);
 router.post('/push/enable', pushController.enable);

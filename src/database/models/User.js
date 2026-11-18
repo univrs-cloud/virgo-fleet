@@ -48,6 +48,11 @@ const User = sequelize.define('User', {
 		allowNull: false,
 		defaultValue: false
 	},
+	biometricEnabled: {
+		type: DataTypes.BOOLEAN,
+		allowNull: false,
+		defaultValue: false
+	},
 	// Account-level intent to receive Web Push update notifications. Set true when any device
 	// subscribes, false when the user turns notifications off (which also drops every device's
 	// subscription). Lets a new device know to obtain its own permission without a manual opt-in.

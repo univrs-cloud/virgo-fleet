@@ -10,6 +10,8 @@ import Group from './Group.js';
 import RecoveryCode from './RecoveryCode.js';
 import WebauthnCredential from './WebauthnCredential.js';
 import WebauthnChallenge from './WebauthnChallenge.js';
+import BiometricCredential from './BiometricCredential.js';
+import BiometricChallenge from './BiometricChallenge.js';
 import PushSubscription from './PushSubscription.js';
 import { sequelize } from '../index.js';
 import { DataTypes } from 'sequelize';
@@ -53,6 +55,12 @@ WebauthnCredential.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' }
 // userId is null for sign-in challenges — the account isn't known until the authenticator answers.
 User.hasMany(WebauthnChallenge, { foreignKey: 'userId', onDelete: 'CASCADE' });
 WebauthnChallenge.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
+
+User.hasMany(BiometricCredential, { foreignKey: 'userId', onDelete: 'CASCADE' });
+BiometricCredential.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
+
+User.hasMany(BiometricChallenge, { foreignKey: 'userId', onDelete: 'CASCADE' });
+BiometricChallenge.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
 
 User.hasMany(PushSubscription, { foreignKey: 'userId', onDelete: 'CASCADE' });
 PushSubscription.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
@@ -101,6 +109,8 @@ export {
 	PushSubscription,
 	WebauthnCredential,
 	WebauthnChallenge,
+	BiometricCredential,
+	BiometricChallenge,
 	UserGroup,
 	NodeAccess,
 	GroupNodeAccess

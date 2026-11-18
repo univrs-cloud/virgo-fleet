@@ -41,6 +41,15 @@ export const webauthnOptionsRateLimiter = rateLimit({
 	message: { status: 'failed', message: AUTH_RATE_LIMIT_MESSAGE }
 });
 
+export const biometricOptionsRateLimiter = rateLimit({
+	windowMs: 15 * 60 * 1000,
+	max: 120,
+	standardHeaders: true,
+	legacyHeaders: false,
+	keyGenerator: clientKey,
+	message: { status: 'failed', message: AUTH_RATE_LIMIT_MESSAGE }
+});
+
 export const messageRateLimiter = rateLimit({
 	windowMs: 60 * 60 * 1000,
 	max: 5,

@@ -13,8 +13,9 @@ import {
 	RecoveryCode,
 	WebauthnCredential,
 	WebauthnChallenge,
+	BiometricCredential,
+	BiometricChallenge,
 	UserGroup,
-	GroupNodeAccess,
 	PushSubscription
 } from '../database/models/associations.js';
 import eventEmitter from '../utils/event_emitter.js';
@@ -35,6 +36,11 @@ import {
 	verifyAuthentication,
 	verifyRegistration
 } from '../utils/webauthn.js';
+import {
+	generateChallenge,
+	isValidCredentialId,
+	verifySignature
+} from '../utils/biometric.js';
 
 const PASSWORD_COST = 12;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
@@ -91,6 +97,7 @@ const CONNECTIVITY_RETENTION_MS = 1000 * 60 * 60 * 25;
 // A WebAuthn ceremony is two round-trips with a user gesture in between; the authenticator's own
 // timeout is 60s, so two minutes is generous and still keeps a stolen challenge worthless.
 const WEBAUTHN_CHALLENGE_TTL_MS = 1000 * 60 * 2;
+const BIOMETRIC_CHALLENGE_TTL_MS = 1000 * 60 * 2;
 
 function toPublicUser(user) {
 	if (!user) {
@@ -557,6 +564,104 @@ class DataService {
 		await sequelize.transaction(async (transaction) => {
 			await WebauthnCredential.destroy({ where: { userId: userId }, transaction });
 			await User.update({ passkeyEnabled: false }, { where: { id: userId }, transaction });
+		});
+		return true;
+	}
+
+	static async createBiometricChallenge({ challenge, type, userId = null }) {
+		await BiometricChallenge.destroy({ where: { expiresAt: { [Op.lt]: new Date() } } });
+		const id = randomBytes(32).toString('hex');
+		await BiometricChallenge.create({
+			id,
+			challenge,
+			type,
+			userId,
+			expiresAt: new Date(Date.now() + BIOMETRIC_CHALLENGE_TTL_MS)
+		});
+		return id;
+	}
+
+	static async consumeBiometricChallenge(id, type) {
+		if (typeof id !== 'string' || !id) {
+			return null;
+		}
+		const row = await BiometricChallenge.findByPk(id);
+		if (!row) {
+			return null;
+		}
+		await row.destroy();
+		if (row.type !== type || row.expiresAt.getTime() < Date.now()) {
+			return null;
+		}
+		return { challenge: row.challenge, userId: row.userId };
+	}
+
+	static async beginBiometricRegistration(userId) {
+		const user = await User.findByPk(userId);
+		if (!user) {
+			throw new Error('User not found.');
+		}
+		const challenge = generateChallenge();
+		const challengeId = await this.createBiometricChallenge({
+			challenge,
+			type: 'registration',
+			userId: userId
+		});
+		return { challenge, challengeId };
+	}
+
+	static async completeBiometricRegistration({ userId, challengeId, credentialId, publicKey, signature }) {
+		const pending = await this.consumeBiometricChallenge(challengeId, 'registration');
+		if (!pending || pending.userId !== userId) {
+			throw new Error('That enrollment expired. Try again.');
+		}
+		if (!isValidCredentialId(credentialId) || !verifySignature({ publicKey, challenge: pending.challenge, signature })) {
+			throw new Error('Could not verify this device.');
+		}
+		await sequelize.transaction(async (transaction) => {
+			await BiometricCredential.create({ credentialId, publicKey, userId: userId }, { transaction });
+			await User.update({ biometricEnabled: true }, { where: { id: userId }, transaction });
+		});
+		return true;
+	}
+
+	static async beginBiometricAuthentication() {
+		const challenge = generateChallenge();
+		const challengeId = await this.createBiometricChallenge({
+			challenge,
+			type: 'authentication'
+		});
+		return { challenge, challengeId };
+	}
+
+	static async completeBiometricAuthentication({ challengeId, credentialId, signature, context }) {
+		const pending = await this.consumeBiometricChallenge(challengeId, 'authentication');
+		if (!pending) {
+			throw new Error('That sign-in attempt expired. Try again.');
+		}
+		const credential = isValidCredentialId(credentialId)
+			? await BiometricCredential.findOne({ where: { credentialId }, include: [User] })
+			: null;
+		if (!credential?.User) {
+			throw new Error('This device is not enrolled.');
+		}
+		if (credential.User.isDisabled) {
+			throw new Error('Invalid credentials.');
+		}
+		if (!verifySignature({ publicKey: credential.publicKey, challenge: pending.challenge, signature })) {
+			throw new Error('Could not verify this device.');
+		}
+		credential.lastUsedAt = new Date();
+		await credential.save();
+		const user = await this.getUserById(credential.userId);
+		const session = await this.createSession(user.id, 'satisfied', context);
+		return { ...session, mfaState: 'satisfied', user };
+	}
+
+	static async disableBiometrics(userId) {
+		await sequelize.transaction(async (transaction) => {
+			await BiometricCredential.destroy({ where: { userId: userId }, transaction });
+			await User.update({ biometricEnabled: false }, { where: { id: userId }, transaction });
 		});
 		return true;
 	}

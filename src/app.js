@@ -8,7 +8,7 @@ import error404Handler from './middleware/error_404_handler.js';
 import errorHandler from './middleware/error_handler.js';
 import frameAncestorsHandler from './middleware/frame_ancestors_handler.js';
 import ownOriginHandler from './middleware/own_origin_handler.js';
-import { authRateLimiter, messageRateLimiter, webauthnOptionsRateLimiter } from './middleware/rate_limit.js';
+import { authRateLimiter, biometricOptionsRateLimiter, messageRateLimiter, webauthnOptionsRateLimiter } from './middleware/rate_limit.js';
 
 function createApp() {
 	const app = express();
@@ -27,8 +27,9 @@ function createApp() {
 	app.use(frameAncestorsHandler);
 	app.use(express.json());
 	// Throttle the credential endpoints to blunt brute-force / credential-stuffing.
-	app.use(['/auth/login', '/auth/signup', '/auth/verify', '/auth/mfa/verify', '/auth/mfa/setup/verify', '/auth/webauthn/verify'], authRateLimiter);
+	app.use(['/auth/login', '/auth/signup', '/auth/verify', '/auth/mfa/verify', '/auth/mfa/setup/verify', '/auth/webauthn/verify', '/auth/biometric/verify'], authRateLimiter);
 	app.use('/auth/webauthn/options', webauthnOptionsRateLimiter);
+	app.use('/auth/biometric/options', biometricOptionsRateLimiter);
 	app.use('/messages', ownOriginHandler, messageRateLimiter);
 	app.use(authCookieHandler);
 	app.use(controllers);
