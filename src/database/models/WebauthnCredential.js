@@ -4,7 +4,7 @@ import { sequelize } from '../index.js';
 // One enrolled WebAuthn authenticator (a passkey). Created only from an MFA-satisfied session, so
 // a credential can never exist unless the user already cleared password + TOTP on some device;
 // that's what lets a later assertion stand in for both.
-const Credential = sequelize.define('Credential', {
+const WebauthnCredential = sequelize.define('WebauthnCredential', {
 	id: {
 		type: DataTypes.INTEGER,
 		primaryKey: true,
@@ -51,7 +51,7 @@ const Credential = sequelize.define('Credential', {
 		allowNull: true
 	}
 }, {
-	tableName: 'credentials'
+	tableName: 'webauthn_credentials'
 });
 
-export default Credential;
+export default WebauthnCredential;

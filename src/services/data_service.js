@@ -11,7 +11,7 @@ import {
 	User,
 	Group,
 	RecoveryCode,
-	Credential,
+	WebauthnCredential,
 	WebauthnChallenge,
 	UserGroup,
 	GroupNodeAccess,
@@ -497,7 +497,7 @@ class DataService {
 			throw new Error('Could not verify this device.');
 		}
 		await sequelize.transaction(async (transaction) => {
-			await Credential.create({ ...verified, userId: userId }, { transaction });
+			await WebauthnCredential.create({ ...verified, userId: userId }, { transaction });
 			await User.update({ passkeyEnabled: true }, { where: { id: userId }, transaction });
 		});
 		return true;
@@ -524,7 +524,7 @@ class DataService {
 		// value and surface a driver error instead of a clean rejection.
 		const credentialId = typeof response?.id === 'string' ? response.id : null;
 		const credential = credentialId
-			? await Credential.findOne({ where: { credentialId }, include: [User] })
+			? await WebauthnCredential.findOne({ where: { credentialId }, include: [User] })
 			: null;
 		if (!credential?.User) {
 			throw new Error('This device is not enrolled.');
@@ -555,7 +555,7 @@ class DataService {
 	 * this is also the lost-device switch, so leaving one behind would defeat the point. */
 	static async disablePasskeys(userId) {
 		await sequelize.transaction(async (transaction) => {
-			await Credential.destroy({ where: { userId: userId }, transaction });
+			await WebauthnCredential.destroy({ where: { userId: userId }, transaction });
 			await User.update({ passkeyEnabled: false }, { where: { id: userId }, transaction });
 		});
 		return true;

@@ -8,7 +8,7 @@ import PendingUser from './PendingUser.js';
 import User from './User.js';
 import Group from './Group.js';
 import RecoveryCode from './RecoveryCode.js';
-import Credential from './Credential.js';
+import WebauthnCredential from './WebauthnCredential.js';
 import WebauthnChallenge from './WebauthnChallenge.js';
 import PushSubscription from './PushSubscription.js';
 import { sequelize } from '../index.js';
@@ -47,8 +47,8 @@ Session.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
 User.hasMany(RecoveryCode, { foreignKey: 'userId', onDelete: 'CASCADE' });
 RecoveryCode.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
 
-User.hasMany(Credential, { foreignKey: 'userId', onDelete: 'CASCADE' });
-Credential.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
+User.hasMany(WebauthnCredential, { foreignKey: 'userId', onDelete: 'CASCADE' });
+WebauthnCredential.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
 
 // userId is null for sign-in challenges — the account isn't known until the authenticator answers.
 User.hasMany(WebauthnChallenge, { foreignKey: 'userId', onDelete: 'CASCADE' });
@@ -99,7 +99,7 @@ export {
 	PendingUser,
 	RecoveryCode,
 	PushSubscription,
-	Credential,
+	WebauthnCredential,
 	WebauthnChallenge,
 	UserGroup,
 	NodeAccess,
