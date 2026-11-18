@@ -17,6 +17,16 @@ const serveFleetShell = (req, res) => {
 router.get('/manifest.json', (req, res) => {
 	res.sendFile(path.join(staticController.folderPath, 'fleet-manifest.json'));
 });
+router.get('/.well-known/assetlinks.json', (req, res) => {
+	res.json([{
+		relation: ['delegate_permission/common.handle_all_urls'],
+		target: {
+			namespace: 'android_app',
+			package_name: 'cloud.univrs.fleet',
+			sha256_cert_fingerprints: ['02:74:0B:C4:99:EB:05:79:64:B7:6E:02:F7:71:3E:BD:F8:25:58:81:76:DA:17:DF:60:A3:B9:E8:EA:54:01:5B']
+		}
+	}]);
+});
 router.post('/auth/signup', authController.signup);
 router.post('/auth/login', authController.login);
 router.post('/auth/logout', authController.logout);
