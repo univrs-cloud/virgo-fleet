@@ -367,6 +367,7 @@ const onConnection = (socket, module) => {
 	socket.on('node:update:complete', (config, ack = () => {}) => relayNodeEvent(socket, module, { namespace: '/host', event: 'host:update:complete' }, config, ack));
 
 	socket.on('node:app:update', (config, ack = () => {}) => relayNodeEvent(socket, module, { namespace: '/docker', event: 'app:update' }, config, ack));
+	socket.on('node:app:nextcloud:update', (config, ack = () => {}) => relayNodeEvent(socket, module, { namespace: '/docker', event: 'app:nextcloud:update' }, config, ack));
 
 	socket.on('group:node:add', async (config, ack = () => {}) => {
 		try {
