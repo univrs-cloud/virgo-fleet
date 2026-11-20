@@ -42,7 +42,8 @@ async function registerVerify(req, res) {
 			challengeId: req.body?.challengeId,
 			credentialId: req.body?.credentialId,
 			publicKey: req.body?.publicKey,
-			signature: req.body?.signature
+			signature: req.body?.signature,
+			certificates: req.body?.certificates
 		});
 		user.biometricEnabled = true;
 		refreshAccountCookie(res, req, session);

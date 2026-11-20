@@ -39,6 +39,7 @@ import {
 import {
 	generateChallenge,
 	isValidCredentialId,
+	verifyAttestation,
 	verifySignature
 } from '../utils/biometric.js';
 
@@ -611,12 +612,12 @@ class DataService {
 		return { challenge, challengeId };
 	}
 
-	static async completeBiometricRegistration({ userId, challengeId, credentialId, publicKey, signature }) {
+	static async completeBiometricRegistration({ userId, challengeId, credentialId, publicKey, signature, certificates }) {
 		const pending = await this.consumeBiometricChallenge(challengeId, 'registration');
 		if (!pending || pending.userId !== userId) {
 			throw new Error('That enrollment expired. Try again.');
 		}
-		if (!isValidCredentialId(credentialId) || !verifySignature({ publicKey, challenge: pending.challenge, signature })) {
+		if (!isValidCredentialId(credentialId) || !verifySignature({ publicKey, challenge: pending.challenge, signature }) || !await verifyAttestation({ certificates, publicKey, challenge: pending.challenge })) {
 			throw new Error('Could not verify this device.');
 		}
 		await sequelize.transaction(async (transaction) => {
