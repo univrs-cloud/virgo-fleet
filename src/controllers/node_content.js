@@ -30,9 +30,36 @@ const resolveFleetUser = async (req) => {
 	return session.User || null;
 };
 
+const watchNodeFiles = (nodePath) => {
+	const reasons = { 502: 'unverified', 503: 'offline', 504: 'timeout' };
+	const checked = new Set();
+	const check = (url) => {
+		const target = new URL(url, location.href);
+		if (target.origin !== location.origin || !target.pathname.startsWith(nodePath) || checked.has(target.href)) {
+			return;
+		}
+
+		checked.add(target.href);
+		fetch(target.href, { method: 'HEAD', cache: 'no-store' }).then((response) => {
+			if (response.status >= 500) {
+				location.replace(`${nodePath}?reason=${reasons[response.status] || 'failed'}`);
+			}
+		}).catch(() => {});
+	};
+	window.addEventListener('error', (event) => {
+		const url = (event.target?.currentSrc || event.target?.src || event.target?.href);
+		if (typeof url === 'string' && url) {
+			check(url);
+		}
+	}, true);
+	document.fonts?.addEventListener('loadingerror', () => {
+		performance.getEntriesByType('resource').filter((entry) => { return /\.(woff2?|ttf|otf|eot)(\?|$)/i.test(entry.name); }).forEach((entry) => { check(entry.name); });
+	});
+};
+
 const injectNodeContext = (html, nodeId) => {
 	const nodePath = `/nodes/${encodeURIComponent(nodeId)}/`;
-	const failureScript = `<script>window.addEventListener('error', (event) => { if (!(event.target instanceof HTMLScriptElement) || !event.target.src) { return; } fetch(event.target.src, { cache: 'no-store' }).then((response) => { const reasons = { 502: 'unverified', 503: 'offline', 504: 'timeout' }; if (response.status >= 500) { location.replace(${JSON.stringify(`${nodePath}?reason=`)} + (reasons[response.status] || 'failed')); } }).catch(() => {}); }, true);</script>`;
+	const failureScript = `<script>(${watchNodeFiles})(${JSON.stringify(nodePath)});</script>`;
 	const context = `<base href="${nodePath}">${failureScript}`;
 	if (/<base\s[^>]*>/i.test(html)) {
 		return html.replace(/<base\s[^>]*>/i, () => { return context; });
