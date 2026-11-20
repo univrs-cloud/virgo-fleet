@@ -1,5 +1,47 @@
+import dns from 'dns';
+import https from 'https';
+import net from 'net';
 import * as webpush from 'web-push';
 import DataService from './data_service.js';
+
+const PRIVATE_ADDRESSES = [
+	/^0\./,
+	/^10\./,
+	/^127\./,
+	/^169\.254\./,
+	/^172\.(1[6-9]|2\d|3[01])\./,
+	/^192\.168\./,
+	/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+	/^::$/,
+	/^::1$/,
+	/^f[cd]/i,
+	/^fe80:/i
+];
+
+const isPrivateAddress = (address) => {
+	const normalized = String(address || '').replace(/^::ffff:/i, '').toLowerCase();
+	return PRIVATE_ADDRESSES.some((pattern) => { return pattern.test(normalized); });
+};
+
+const publicLookup = (hostname, options, callback) => {
+	dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
+		if (error) {
+			callback(error);
+			return;
+		}
+		if (addresses.some((entry) => { return isPrivateAddress(entry.address); })) {
+			callback(Object.assign(new Error(`${hostname} is on a private network.`), { code: 'EPRIVATE' }));
+			return;
+		}
+		if (options?.all) {
+			callback(null, addresses);
+			return;
+		}
+		callback(null, addresses[0].address, addresses[0].family);
+	});
+};
+
+const publicAgent = new https.Agent({ lookup: publicLookup });
 
 // VAPID keypair is provided via the environment (see Dockerfile / README) and generated once — the
 // public key is baked into every browser subscription, so rotating it invalidates them all. When the
@@ -41,10 +83,16 @@ class PushService {
 	}
 
 	static async #sendToSubscription(sub, payload) {
+		const host = new URL(sub.endpoint).hostname.replace(/^\[|\]$/g, '');
+		if (net.isIP(host) && isPrivateAddress(host)) {
+			console.error(`[push] Refused to send a notification to ${host}, it is on a private network.`);
+			return;
+		}
 		try {
 			await webpush.sendNotification(
 				{ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-				payload
+				payload,
+				{ agent: publicAgent }
 			);
 		} catch (error) {
 			// 404/410 mean the browser has dropped this subscription; prune it so we stop trying.

@@ -1347,7 +1347,7 @@ class DataService {
 		const endpoint = subscription?.endpoint;
 		const p256dh = subscription?.keys?.p256dh;
 		const auth = subscription?.keys?.auth;
-		if (!endpoint || !p256dh || !auth) {
+		if (!endpoint || !p256dh || !auth || !URL.canParse(endpoint) || new URL(endpoint).protocol !== 'https:') {
 			throw new Error('Invalid push subscription.');
 		}
 		const [row, created] = await PushSubscription.findOrCreate({
