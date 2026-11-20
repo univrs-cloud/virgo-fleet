@@ -131,50 +131,74 @@ function keyDescriptionOf(der) {
 	return (extension ? AsnParser.parse(extension.extnValue.buffer, NonStandardKeyDescription) : null);
 }
 
-function isOurApp(description) {
+function appOf(description) {
 	const applicationId = (description.softwareEnforced.findProperty('attestationApplicationId') || description.teeEnforced.findProperty('attestationApplicationId'));
 	if (!applicationId) {
-		return false;
+		return { packages: [], digests: [] };
 	}
 	const parsed = AsnParser.parse(applicationId.buffer, AttestationApplicationId);
-	const isPackage = parsed.packageInfos.some((info) => { return Buffer.from(info.packageName.buffer).toString('utf8') === PACKAGE_NAME; });
-	const isSigned = parsed.signatureDigests.some((digest) => { return Buffer.from(digest.buffer).toString('hex') === SIGNING_CERTIFICATE_DIGEST; });
-	return isPackage && isSigned;
+	return {
+		packages: parsed.packageInfos.map((info) => { return Buffer.from(info.packageName.buffer).toString('utf8'); }),
+		digests: parsed.signatureDigests.map((digest) => { return Buffer.from(digest.buffer).toString('hex'); })
+	};
+}
+
+function refuse(reason) {
+	console.warn(`Biometric enrollment refused: ${reason}`);
+	return false;
 }
 
 async function verifyAttestation({ certificates, publicKey, challenge }) {
 	if (!Array.isArray(certificates) || certificates.length < 2 || certificates.length > CHAIN_MAX_LENGTH || !certificates.every((entry) => { return typeof entry === 'string' && entry.length > 0 && entry.length <= CERTIFICATE_MAX_LENGTH; })) {
-		return false;
+		return refuse(`no usable certificate chain was sent (${Array.isArray(certificates) ? `${certificates.length} certificates` : typeof certificates}).`);
 	}
 	try {
 		const ders = certificates.map((entry) => { return Buffer.from(entry, 'base64url'); });
 		const chain = ders.map((der) => { return new X509Certificate(der); });
 		const root = chain[chain.length - 1];
-		const isLinked = chain.every((certificate, index) => { return certificate.verify((chain[index + 1] || root).publicKey); });
-		if (!isLinked || !isTrustedRoot(root)) {
-			return false;
+		if (!chain.every((certificate, index) => { return certificate.verify((chain[index + 1] || root).publicKey); })) {
+			return refuse('the certificate chain is not signed in order.');
+		}
+		if (!isTrustedRoot(root)) {
+			return refuse(`the chain ends at an unknown root (${root.subject.replace(/\n/g, ', ')}).`);
 		}
 
 		const entries = await loadRevocations();
-		if (chain.some((certificate) => { return Boolean(entries[serialOf(certificate)]); })) {
-			return false;
+		const revoked = chain.find((certificate) => { return Boolean(entries[serialOf(certificate)]); });
+		if (revoked) {
+			return refuse(`certificate ${serialOf(revoked)} is ${entries[serialOf(revoked)].status}.`);
 		}
 
 		if (ders.slice(1).some((der) => { return keyDescriptionOf(der); })) {
-			return false;
+			return refuse('a certificate above the key carries its own attestation.');
 		}
 
 		const leafKey = parsePublicKey(publicKey);
 		const description = keyDescriptionOf(ders[0]);
-		if (!leafKey || !description || spkiOf(chain[0].publicKey) !== spkiOf(leafKey)) {
-			return false;
+		if (!leafKey || !description) {
+			return refuse((leafKey ? 'the key certificate has no attestation.' : 'the public key is not a P-256 key.'));
+		}
+		if (spkiOf(chain[0].publicKey) !== spkiOf(leafKey)) {
+			return refuse('the attested key is not the key that signed the challenge.');
+		}
+		if (![SecurityLevel.trustedEnvironment, SecurityLevel.strongBox].includes(description.attestationSecurityLevel)) {
+			return refuse(`the key is not in secure hardware (security level ${description.attestationSecurityLevel}).`);
+		}
+		if (!Buffer.from(description.attestationChallenge.buffer).equals(Buffer.from(challenge, 'utf8'))) {
+			return refuse('the attested challenge does not match.');
 		}
 
-		const isHardware = [SecurityLevel.trustedEnvironment, SecurityLevel.strongBox].includes(description.attestationSecurityLevel);
-		const isChallenge = Buffer.from(description.attestationChallenge.buffer).equals(Buffer.from(challenge, 'utf8'));
 		const hardware = description.teeEnforced;
-		const needsFingerprint = (hardware.findProperty('noAuthRequired') === undefined && (Number(hardware.findProperty('userAuthType')) & FINGERPRINT_AUTHENTICATOR) !== 0);
-		return isHardware && isChallenge && needsFingerprint && isOurApp(description);
+		const userAuthType = hardware.findProperty('userAuthType');
+		if (hardware.findProperty('noAuthRequired') !== undefined || (Number(userAuthType) & FINGERPRINT_AUTHENTICATOR) === 0) {
+			return refuse(`the key does not require a fingerprint (userAuthType ${userAuthType}).`);
+		}
+
+		const app = appOf(description);
+		if (!app.packages.includes(PACKAGE_NAME) || !app.digests.includes(SIGNING_CERTIFICATE_DIGEST)) {
+			return refuse(`the key belongs to another app (${app.packages.join(', ') || 'none'}, signed ${app.digests.join(', ') || 'none'}).`);
+		}
+		return true;
 	} catch (error) {
 		console.error('Could not verify a biometric attestation:', error);
 		return false;
