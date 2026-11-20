@@ -6,7 +6,7 @@ import CloudflareService from './cloudflare.js';
 const LABEL_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 const RESERVED_CLUSTER_NAMES = new Set([
 	'fleet', 'apps', 'packages', 'www', 'api', 'auth', 'admin', 'mail', 'smtp', 'imap',
-	'ns', 'ns1', 'ns2', 'mx', 'traefik', 'status', 'docs', 'blog', 'cdn', 'static'
+	'ns', 'ns1', 'ns2', 'mx', 'traefik', 'status', 'docs', 'blog', 'cdn', 'static', 'relay', 'autoconfig', 'autodiscover'
 ]);
 const CHALLENGE_PREFIX = '_acme-challenge.';
 const ISSUANCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
