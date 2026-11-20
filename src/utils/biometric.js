@@ -138,8 +138,8 @@ function appOf(description) {
 	}
 	const parsed = AsnParser.parse(applicationId.buffer, AttestationApplicationId);
 	return {
-		packages: parsed.packageInfos.map((info) => { return Buffer.from(info.packageName.buffer).toString('utf8'); }),
-		digests: parsed.signatureDigests.map((digest) => { return Buffer.from(digest.buffer).toString('hex'); })
+		packages: parsed.packageInfos.map((info) => { return Buffer.from(info.packageName.buffer ?? info.packageName).toString('utf8'); }),
+		digests: parsed.signatureDigests.map((digest) => { return Buffer.from(digest.buffer ?? digest).toString('hex'); })
 	};
 }
 
