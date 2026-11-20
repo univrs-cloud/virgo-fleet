@@ -5,7 +5,7 @@ import { gunzip } from 'zlib';
 import DataService from '../services/data_service.js';
 import { getSessionTokenFromCookieHeader } from '../utils/auth_cookies.js';
 import { fetchNodeAsset } from '../utils/node_assets.js';
-import { applyFleetIdentity } from './static.js';
+import { applyFleetIdentity, renderFleetShell } from './static.js';
 
 const RELEASE_TTL_MS = 60 * 1000;
 const MAX_UNPACKED_BYTES = 8 * 1024 * 1024;
@@ -13,6 +13,7 @@ const unpack = promisify(gunzip);
 const ICON_FOLDERS = ['assets/img/apps/', 'assets/img/shortcuts/'];
 const ICON_PATTERN = /\.(png|jpe?g|gif|webp|svg|ico)$/i;
 const ICON_POLICY = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; frame-ancestors 'none'";
+const UNAVAILABLE_REASONS = ['unverified', 'offline', 'timeout', 'failed', 'denied', 'unavailable'];
 const releases = new Map();
 let releaseKey = null;
 
@@ -30,14 +31,16 @@ const resolveFleetUser = async (req) => {
 };
 
 const injectNodeContext = (html, nodeId) => {
-	const baseTag = `<base href="/nodes/${nodeId}/">`;
+	const nodePath = `/nodes/${encodeURIComponent(nodeId)}/`;
+	const failureScript = `<script>window.addEventListener('error', (event) => { if (!(event.target instanceof HTMLScriptElement) || !event.target.src) { return; } fetch(event.target.src, { cache: 'no-store' }).then((response) => { const reasons = { 502: 'unverified', 503: 'offline', 504: 'timeout' }; if (response.status >= 500) { location.replace(${JSON.stringify(`${nodePath}?reason=`)} + (reasons[response.status] || 'failed')); } }).catch(() => {}); }, true);</script>`;
+	const context = `<base href="${nodePath}">${failureScript}`;
 	if (/<base\s[^>]*>/i.test(html)) {
-		return html.replace(/<base\s[^>]*>/i, baseTag);
+		return html.replace(/<base\s[^>]*>/i, () => { return context; });
 	}
-	if (html.includes('</head>')) {
-		return html.replace('</head>', `${baseTag}</head>`);
+	if (/<head[^>]*>/i.test(html)) {
+		return html.replace(/<head[^>]*>/i, (head) => { return `${head}${context}`; });
 	}
-	return `${baseTag}${html}`;
+	return `${context}${html}`;
 };
 
 const STATIC_ASSET_PATTERN = /\.(js|mjs|css|map|json|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|eot|txt|webmanifest)$/i;
@@ -56,11 +59,32 @@ const isIconPath = (name) => {
 	return ICON_FOLDERS.some((folder) => { return name.startsWith(folder); });
 };
 
+const sendUnavailable = (res, status, reason) => {
+	const meta = `<meta name="node-unavailable" content="${(UNAVAILABLE_REASONS.includes(reason) ? reason : 'failed')}">`;
+	res.status(status);
+	res.set('Content-Type', 'text/html; charset=utf-8');
+	res.set('Cache-Control', 'no-store');
+	res.send(renderFleetShell().replace(/<head[^>]*>/i, (head) => { return `${head}${meta}`; }));
+};
+
+const reasonOf = (error) => {
+	if (error.reason) {
+		return error.reason;
+	}
+	if (error.status === 503) {
+		return 'offline';
+	}
+	if (error.status === 504) {
+		return 'timeout';
+	}
+	return 'failed';
+};
+
 const getReleaseKey = () => {
 	if (!releaseKey) {
 		const key = String(process.env.RELEASE_PUBLIC_KEY || '').trim();
 		if (!key) {
-			throw Object.assign(new Error('RELEASE_PUBLIC_KEY is not configured.'), { status: 503 });
+			throw Object.assign(new Error('RELEASE_PUBLIC_KEY is not configured.'), { status: 503, reason: 'unavailable' });
 		}
 		releaseKey = createPublicKey({ key: Buffer.from(key, 'base64'), format: 'der', type: 'spki' });
 	}
@@ -79,12 +103,12 @@ const fetchRelease = async (nodeId) => {
 	]);
 	const isSigned = (list.status === 200 && signature.status === 200 && verify(null, list.body, key, Buffer.from(signature.body.toString('utf8').trim(), 'base64')));
 	if (!isSigned) {
-		throw Object.assign(new Error('This node is not running a signed release.'), { status: 502 });
+		throw Object.assign(new Error('This node is not running a signed release.'), { status: 502, reason: 'unverified' });
 	}
 
 	const files = JSON.parse(list.body.toString('utf8'))?.files;
 	if (!files || typeof files !== 'object') {
-		throw Object.assign(new Error('This node sent an unreadable release.'), { status: 502 });
+		throw Object.assign(new Error('This node sent an unreadable release.'), { status: 502, reason: 'unverified' });
 	}
 	return files;
 };
@@ -117,6 +141,7 @@ const matchesRelease = async (nodeId, name, body) => {
 };
 
 const serveNodeContent = async (req, res, next) => {
+	let isDocument = false;
 	try {
 		const nodeId = req.params.nodeId;
 		if (!nodeId) {
@@ -130,16 +155,22 @@ const serveNodeContent = async (req, res, next) => {
 			return;
 		}
 
-		const allowed = await DataService.canUserAccessNode(user.id, nodeId);
-		if (!allowed) {
-			res.status(403).end();
-			return;
-		}
-
 		const restParam = req.params.rest;
 		const rest = Array.isArray(restParam) ? restParam.join('/') : (restParam || '');
 		const rawPath = rest ? `/${rest}` : '/';
 		const name = rawPath.slice(1);
+		isDocument = isDocumentPath(rawPath);
+
+		const allowed = await DataService.canUserAccessNode(user.id, nodeId);
+		if (!allowed) {
+			if (isDocument) {
+				sendUnavailable(res, 403, 'denied');
+				return;
+			}
+
+			res.status(403).end();
+			return;
+		}
 
 		if (name === 'release.json') {
 			const files = await loadRelease(nodeId);
@@ -148,15 +179,20 @@ const serveNodeContent = async (req, res, next) => {
 			return;
 		}
 
-		if (isDocumentPath(rawPath)) {
+		if (isDocument) {
+			if (UNAVAILABLE_REASONS.includes(req.query?.reason)) {
+				sendUnavailable(res, 502, req.query.reason);
+				return;
+			}
+
 			const { status, body } = await fetchNodeAsset(nodeId, rawPath);
 			if (status >= 400) {
-				res.status(status).end();
+				sendUnavailable(res, 502, 'failed');
 				return;
 			}
 
 			if (!await matchesRelease(nodeId, 'index.html', body)) {
-				res.status(502).end();
+				sendUnavailable(res, 502, 'unverified');
 				return;
 			}
 
@@ -204,6 +240,11 @@ const serveNodeContent = async (req, res, next) => {
 	} catch (error) {
 		if (error.status) {
 			if (!res.headersSent) {
+				if (isDocument) {
+					sendUnavailable(res, error.status, reasonOf(error));
+					return;
+				}
+
 				res.status(error.status).end();
 				return;
 			}
