@@ -43,6 +43,7 @@ import {
 } from '../utils/biometric.js';
 
 const PASSWORD_COST = 12;
+const MIN_PASSWORD_LENGTH = 8;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 // Floor on how often a session's lastSeenAt is rewritten — "active 2 minutes ago" needs no finer
 // resolution, and every request passes through the touch.
@@ -673,6 +674,9 @@ class DataService {
 		const normalizedEmail = normalizeEmail(email);
 		if (!normalizedEmail || !password) {
 			throw new Error('email and password are required.');
+		}
+		if (String(password).length < MIN_PASSWORD_LENGTH) {
+			throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
 		}
 		// A verified account already owns this email — registration must not shadow it.
 		const existing = await this.getUserByEmail(normalizedEmail);
