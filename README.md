@@ -7,6 +7,7 @@ CERTRESOLVER='le'
 APP_DIR='/messier/apps/fleet'
 DB_PASSWORD='your-db-password'
 MFA_SECRET_KEY='a-long-random-string'
+RELEASE_PUBLIC_KEY='base64-of-the-virgo-ui-release-public-key'
 TURN_SECRET_KEY='a-long-random-string'
 TURN_EXTERNAL_IP='your.public.ip.address'
 TURN_INTERNAL_IP='the.host.lan.address'
@@ -33,6 +34,17 @@ The Cloudflare credentials issue the DNS-01 wildcard certificates for nodes on t
 token scoped to that one zone with `Zone:DNS:Edit`, and copy the zone id from the zone's overview page so
 the token needs no `Zone:Read`. A Cloudflare token cannot be scoped below a zone, which is why nodes never
 receive it and ask fleet to publish their challenge records instead.
+
+`RELEASE_PUBLIC_KEY` checks the node pages fleet passes on. Every virgo-ui release ships `release.json`, the
+SHA-256 of each file in the build, and `release.sig`, its Ed25519 signature. Fleet only passes a page, script
+or stylesheet from a node when the list is signed by this key and the file matches it; app and shortcut icons
+are the exception and go out as images that cannot run scripts. A node on a build that is not signed cannot be
+opened through fleet. Generate the pair once; the private key is the `RELEASE_SIGNING_KEY` secret of the
+virgo-ui repository, and the public key goes here:
+```
+openssl genpkey -algorithm ed25519 -out release-signing-key.pem
+openssl pkey -in release-signing-key.pem -pubout -outform DER | base64
+```
 
 ## Messages
 
@@ -242,6 +254,7 @@ services:
       - DB_USER=${DB_USER:-fleet}
       - DB_PASSWORD=${DB_PASSWORD}
       - MFA_SECRET_KEY=${MFA_SECRET_KEY}
+      - RELEASE_PUBLIC_KEY=${RELEASE_PUBLIC_KEY}
       - TURN_SECRET_KEY=${TURN_SECRET_KEY}
       - TURN_LISTENING_PORT=${TURN_LISTENING_PORT:-3477}
       - TURN_TLS_PORT=${TURN_TLS_PORT:-}

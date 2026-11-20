@@ -4,11 +4,7 @@ import { getNodeSocket } from './node_registry.js';
 const INITIAL_TIMEOUT_MS = 15000;
 const CHUNK_TIMEOUT_MS = 30000;
 const MAX_TRANSFER_MS = 300000;
-// Upper bound on a fully-buffered asset (fetchNodeAsset). Only documents are buffered — static
-// assets stream — but a node is a remote agent, so cap accumulation to stop a misbehaving or
-// compromised node from exhausting server memory by streaming an oversized "document". The HTML
-// shell is only kilobytes, so 1 MB is generous while keeping the per-request worst case small.
-const MAX_BUFFERED_ASSET_BYTES = 1 * 1024 * 1024;
+const MAX_BUFFERED_ASSET_BYTES = 8 * 1024 * 1024;
 
 const pendingHttpRequests = new Map();
 
@@ -207,43 +203,13 @@ function proxyNodeHttp(nodeId, assetPath, handlers, { acceptEncoding } = {}) {
 	});
 }
 
-function writeChunkWithBackpressure(res, chunk) {
-	return new Promise((resolve, reject) => {
-		if (res.destroyed || res.writableEnded) {
-			reject(Object.assign(new Error('Response closed'), { status: 499 }));
-			return;
-		}
-
-		const ok = res.write(chunk);
-		if (ok) {
-			resolve();
-			return;
-		}
-
-		const onDrain = () => {
-			cleanup();
-			resolve();
-		};
-		const onError = (error) => {
-			cleanup();
-			reject(error);
-		};
-		const cleanup = () => {
-			res.off('drain', onDrain);
-			res.off('error', onError);
-		};
-
-		res.once('drain', onDrain);
-		res.once('error', onError);
-	});
-}
-
-async function fetchNodeAsset(nodeId, assetPath) {
+async function fetchNodeAsset(nodeId, assetPath, { acceptEncoding } = {}) {
 	const chunks = [];
 	let bufferedBytes = 0;
 	const result = {
 		status: 502,
 		contentType: 'application/octet-stream',
+		contentEncoding: null,
 		body: Buffer.alloc(0)
 	};
 
@@ -251,51 +217,27 @@ async function fetchNodeAsset(nodeId, assetPath) {
 		onResponse: ({ status, headers }) => {
 			result.status = status;
 			result.contentType = headers['content-type'] || result.contentType;
+			result.contentEncoding = headers['content-encoding'] || null;
 		},
 		// async so a thrown cap error surfaces as a rejected promise that handleHttpChunk's
 		// catch turns into failPendingRequest, rather than a synchronous throw in the event handler.
 		onChunk: async (chunk) => {
 			bufferedBytes += chunk.length;
 			if (bufferedBytes > MAX_BUFFERED_ASSET_BYTES) {
-				throw Object.assign(new Error('Document exceeds maximum buffered size'), { status: 502 });
+				throw Object.assign(new Error('Asset exceeds maximum buffered size'), { status: 502 });
 			}
 			chunks.push(chunk);
 		},
 		onEnd: () => {
 			result.body = Buffer.concat(chunks);
 		}
-	});
+	}, { acceptEncoding });
 
 	return result;
-}
-
-async function streamNodeAsset(nodeId, assetPath, res, { cacheControl } = {}) {
-	await proxyNodeHttp(nodeId, assetPath, {
-		onResponse: ({ status, headers }) => {
-			res.status(status);
-			if (headers['content-type']) {
-				res.set('Content-Type', headers['content-type']);
-			}
-			if (headers['content-encoding']) {
-				res.set('Content-Encoding', headers['content-encoding']);
-				res.set('Vary', 'Accept-Encoding');
-			}
-			if (cacheControl) {
-				res.set('Cache-Control', cacheControl);
-			}
-		},
-		onChunk: (chunk) => writeChunkWithBackpressure(res, chunk),
-		onEnd: () => {
-			if (!res.writableEnded) {
-				res.end();
-			}
-		}
-	}, { acceptEncoding: 'gzip' });
 }
 
 export {
 	attachNodeAssetHandler,
 	failPendingRequestsForNode,
-	fetchNodeAsset,
-	streamNodeAsset
+	fetchNodeAsset
 };
