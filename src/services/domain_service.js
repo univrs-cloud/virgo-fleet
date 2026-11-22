@@ -67,14 +67,6 @@ class DomainService {
 		return ClusterMember.findOne({ where: { nodeId }, include: [Cluster] });
 	}
 
-	static async hasLegacyMember(cluster) {
-		const members = await ClusterMember.findAll({ where: { clusterId: cluster.id }, include: [{ model: Node, attributes: ['name', 'domainName'] }] });
-		return members.some((member) => {
-			const identifier = (member.Node?.domainName ? this.parseIdentifier(member.Node.name, member.Node.domainName) : null);
-			return (!identifier || identifier.nodeFqdn === cluster.fqdn);
-		});
-	}
-
 	static async leaveCluster(membership) {
 		const cluster = membership.Cluster;
 		await CloudflareService.deleteRecords(Object.values(membership.recordIds || {}));
@@ -271,16 +263,12 @@ class DomainService {
 		const wildcard = `*.${domain.fqdn}`;
 		await this.replaceConflicting(wildcard, 'A');
 		const recordIds = { wildcard: await CloudflareService.upsertA(wildcard, address) };
-		if (await this.hasLegacyMember(domain)) {
-			await this.replaceConflicting(domain.fqdn, 'A');
-			recordIds.apex = await CloudflareService.upsertA(domain.fqdn, address);
-		} else {
-			await CloudflareService.deleteRecord(domain.recordIds?.apex);
-		}
+		await this.replaceConflicting(domain.fqdn, 'A');
+		recordIds.apex = await CloudflareService.upsertA(domain.fqdn, address);
 
 		domain.recordIds = recordIds;
 		await domain.save();
-		console.log(`[domains] ${(recordIds.apex ? `${domain.fqdn} and ` : '')}${wildcard} point at ${address} (${domain.target}).`);
+		console.log(`[domains] ${domain.fqdn} and ${wildcard} point at ${address} (${domain.target}).`);
 		return domain;
 	}
 
