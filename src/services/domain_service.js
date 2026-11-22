@@ -220,12 +220,13 @@ class DomainService {
 		const address = (domain.target === 'public' ? (domain.publicIp || membership.lanIp) : membership.lanIp);
 		const recordIds = {};
 		if (nodeFqdn && membership.lanIp && address) {
-			for (const [key, name] of Object.entries({ node: nodeFqdn, wildcard: `*.${nodeFqdn}` })) {
+			const names = (domain.target === 'public' ? { wildcard: `*.${nodeFqdn}` } : { node: nodeFqdn, wildcard: `*.${nodeFqdn}` });
+			for (const [key, name] of Object.entries(names)) {
 				await this.replaceConflicting(name, 'A');
 				recordIds[key] = await CloudflareService.upsertA(name, address);
 			}
 
-			console.log(`[domains] ${nodeFqdn} and *.${nodeFqdn} point at ${address} (${domain.target}).`);
+			console.log(`[domains] ${Object.values(names).join(' and ')} point at ${address} (${domain.target}).`);
 		}
 
 		const kept = Object.values(recordIds);
