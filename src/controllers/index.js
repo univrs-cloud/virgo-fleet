@@ -46,6 +46,7 @@ router.post('/auth/verify', authController.verify);
 router.post('/auth/mfa/setup', authController.mfaSetup);
 router.post('/auth/mfa/setup/verify', authController.mfaSetupVerify);
 router.post('/auth/mfa/verify', authController.mfaVerify);
+router.post('/auth/mfa/recovery-codes', authController.regenerateRecoveryCodes);
 router.post('/auth/webauthn/register/options', webauthnController.registerOptions);
 router.post('/auth/webauthn/register/verify', webauthnController.registerVerify);
 router.post('/auth/webauthn/options', webauthnController.authenticateOptions);

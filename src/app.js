@@ -27,7 +27,7 @@ function createApp() {
 	app.use(frameAncestorsHandler);
 	app.use(express.json());
 	// Throttle the credential endpoints to blunt brute-force / credential-stuffing.
-	app.use(['/auth/login', '/auth/signup', '/auth/verify', '/auth/mfa/verify', '/auth/mfa/setup/verify', '/auth/webauthn/verify', '/auth/biometric/verify'], authRateLimiter);
+	app.use(['/auth/login', '/auth/signup', '/auth/verify', '/auth/mfa/verify', '/auth/mfa/setup/verify', '/auth/mfa/recovery-codes', '/auth/webauthn/verify', '/auth/biometric/verify'], authRateLimiter);
 	app.use('/auth/webauthn/options', webauthnOptionsRateLimiter);
 	app.use('/auth/biometric/options', biometricOptionsRateLimiter);
 	app.use('/messages', ownOriginHandler, messageRateLimiter);

@@ -62,6 +62,10 @@ function emitSessionsUpdated(userId) {
 	}
 }
 
+function emitRecoveryCodesUpdated(userId) {
+	eventEmitter.emit('recovery-codes:updated', { userId });
+}
+
 function emitSessionsRevoked(sessionIds) {
 	if (sessionIds.length) {
 		eventEmitter.emit('sessions:revoked', { sessionIds });
@@ -415,6 +419,7 @@ class DataService {
 				{ transaction }
 			);
 		});
+		emitRecoveryCodesUpdated(userId);
 		return { recoveryCodes };
 	}
 
@@ -427,6 +432,26 @@ class DataService {
 		return verifyToken(code, decryptSecret(user.totpSecret));
 	}
 
+	static async regenerateRecoveryCodes(userId, code) {
+		const user = await User.findByPk(userId);
+		if (!user || !user.totpSecret) {
+			throw new Error('Two-factor authentication is not set up.');
+		}
+		if (!verifyToken(code, decryptSecret(user.totpSecret))) {
+			throw new Error('That code is not valid. Try again with a fresh code from your app.');
+		}
+		const recoveryCodes = generateRecoveryCodes();
+		await sequelize.transaction(async (transaction) => {
+			await RecoveryCode.destroy({ where: { userId: userId }, transaction });
+			await RecoveryCode.bulkCreate(
+				recoveryCodes.map((plain) => { return { userId: userId, codeHash: hashRecoveryCode(plain) }; }),
+				{ transaction }
+			);
+		});
+		emitRecoveryCodesUpdated(userId);
+		return { recoveryCodes };
+	}
+
 	/** Verify and consume a one-time recovery code (bcrypt-compared, then stamped used). */
 	static async consumeRecoveryCode(userId, code) {
 		const rows = await RecoveryCode.findAll({ where: { userId: userId, usedAt: null } });
@@ -434,14 +459,20 @@ class DataService {
 			if (verifyRecoveryCode(code, row.codeHash)) {
 				row.usedAt = new Date();
 				await row.save();
+				emitRecoveryCodesUpdated(userId);
 				return true;
 			}
 		}
 		return false;
 	}
 
-	static async countRemainingRecoveryCodes(userId) {
-		return RecoveryCode.count({ where: { userId: userId, usedAt: null } });
+	static async getRecoveryCodesSummary(userId) {
+		const rows = await RecoveryCode.findAll({ where: { userId: userId }, attributes: ['usedAt', 'createdAt'], order: [['createdAt', 'ASC']] });
+		return {
+			remaining: rows.filter((row) => { return !row.usedAt; }).length,
+			total: rows.length,
+			generatedAt: rows[0]?.createdAt || null
+		};
 	}
 
 	/** Stash a challenge for the second half of a ceremony and return the handle the client echoes

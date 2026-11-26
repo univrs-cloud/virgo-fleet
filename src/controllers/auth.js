@@ -125,6 +125,20 @@ async function mfaVerify(req, res) {
 	}
 }
 
+async function regenerateRecoveryCodes(req, res) {
+	try {
+		const { session, user } = await sessionFromRequest(req);
+		if (!user || session.mfaState !== 'satisfied') {
+			res.status(401).json({ status: 'failed', message: 'Not authenticated.' });
+			return;
+		}
+		const { recoveryCodes } = await DataService.regenerateRecoveryCodes(user.id, req.body?.code);
+		res.json({ status: 'succeeded', recoveryCodes });
+	} catch (error) {
+		res.status(400).json({ status: 'failed', message: error.message });
+	}
+}
+
 const MIN_PASSWORD_LENGTH = 8;
 
 // Self-service password change for the logged-in fleet user. This lives on HTTP (not a socket)
@@ -182,5 +196,6 @@ export {
 	changePassword,
 	mfaSetup,
 	mfaSetupVerify,
-	mfaVerify
+	mfaVerify,
+	regenerateRecoveryCodes
 };
