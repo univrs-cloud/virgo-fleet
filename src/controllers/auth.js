@@ -125,6 +125,42 @@ async function mfaVerify(req, res) {
 	}
 }
 
+async function authenticatorChange(req, res) {
+	try {
+		const { session, user } = await sessionFromRequest(req);
+		if (!user || session.mfaState !== 'satisfied') {
+			res.status(401).json({ status: 'failed', message: 'Not authenticated.' });
+			return;
+		}
+		const password = req.body?.password;
+		if (!password) {
+			throw new Error('Password is required.');
+		}
+		const verified = await DataService.verifyCredentials({ email: user.email, password });
+		if (!verified) {
+			throw new Error('Password is incorrect.');
+		}
+		const { secret, otpauthUrl } = await DataService.beginTotpSetup(user.id);
+		res.json({ status: 'succeeded', secret, otpauthUrl });
+	} catch (error) {
+		res.status(400).json({ status: 'failed', message: error.message });
+	}
+}
+
+async function authenticatorChangeVerify(req, res) {
+	try {
+		const { session, user } = await sessionFromRequest(req);
+		if (!user || session.mfaState !== 'satisfied') {
+			res.status(401).json({ status: 'failed', message: 'Not authenticated.' });
+			return;
+		}
+		const { recoveryCodes } = await DataService.confirmTotpSetup(user.id, req.body?.code);
+		res.json({ status: 'succeeded', recoveryCodes });
+	} catch (error) {
+		res.status(400).json({ status: 'failed', message: error.message });
+	}
+}
+
 async function regenerateRecoveryCodes(req, res) {
 	try {
 		const { session, user } = await sessionFromRequest(req);
@@ -197,5 +233,7 @@ export {
 	mfaSetup,
 	mfaSetupVerify,
 	mfaVerify,
+	authenticatorChange,
+	authenticatorChangeVerify,
 	regenerateRecoveryCodes
 };
