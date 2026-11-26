@@ -612,12 +612,12 @@ class DataService {
 		return { challenge, challengeId };
 	}
 
-	static async completeBiometricRegistration({ userId, challengeId, credentialId, publicKey, signature, certificates }) {
+	static async completeBiometricRegistration({ userId, challengeId, credentialId, publicKey, signature, certificates, attestation }) {
 		const pending = await this.consumeBiometricChallenge(challengeId, 'registration');
 		if (!pending || pending.userId !== userId) {
 			throw new Error('That enrollment expired. Try again.');
 		}
-		if (!isValidCredentialId(credentialId) || !verifySignature({ publicKey, challenge: pending.challenge, signature }) || !await verifyAttestation({ certificates, publicKey, challenge: pending.challenge })) {
+		if (!isValidCredentialId(credentialId) || !verifySignature({ publicKey, challenge: pending.challenge, signature }) || !await verifyAttestation({ certificates, attestation, publicKey, challenge: pending.challenge })) {
 			throw new Error('Could not verify this device.');
 		}
 		await sequelize.transaction(async (transaction) => {

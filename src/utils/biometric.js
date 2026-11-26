@@ -1,18 +1,39 @@
-import { X509Certificate, createPublicKey, randomBytes, verify } from 'crypto';
+import { X509Certificate, createHash, createPublicKey, randomBytes, verify } from 'crypto';
 import { AsnParser } from '@peculiar/asn1-schema';
 import { AttestationApplicationId, NonStandardKeyDescription, SecurityLevel, id_ce_keyDescription } from '@peculiar/asn1-android';
 import { Certificate } from '@peculiar/asn1-x509';
+import { decodeAttestationObject, parseAuthenticatorData } from '@simplewebauthn/server/helpers';
 
 const CREDENTIAL_ID_MAX_LENGTH = 128;
 const PUBLIC_KEY_MAX_LENGTH = 1024;
 const SIGNATURE_MAX_LENGTH = 256;
 const CERTIFICATE_MAX_LENGTH = 8192;
 const CHAIN_MAX_LENGTH = 8;
+const ATTESTATION_MAX_LENGTH = 16384;
 const PACKAGE_NAME = 'cloud.univrs.fleet';
 const SIGNING_CERTIFICATE_DIGEST = '02740bc499eb057964b76e02f7713ebdf825588176da17df60a3b9e8ea54015b';
 const FINGERPRINT_AUTHENTICATOR = 2;
 const REVOCATION_URL = 'https://android.googleapis.com/attestation/status';
 const REVOCATION_TTL_MS = 1000 * 60 * 60;
+const APP_ID = '96J2Q5Y3U3.cloud.univrs.fleet';
+const APP_ATTEST_FORMAT = 'apple-appattest';
+const APP_ATTEST_NONCE_OID = '1.2.840.113635.100.8.2';
+const APP_ATTEST_NONCE_PREFIX = Buffer.from('3024a1220420', 'hex');
+const APP_ATTEST_ENVIRONMENTS = [Buffer.from('appattestdevelop'), Buffer.concat([Buffer.from('appattest'), Buffer.alloc(7)])];
+const APPLE_ROOT = `-----BEGIN CERTIFICATE-----
+MIICITCCAaegAwIBAgIQC/O+DvHN0uD7jG5yH2IXmDAKBggqhkjOPQQDAzBSMSYw
+JAYDVQQDDB1BcHBsZSBBcHAgQXR0ZXN0YXRpb24gUm9vdCBDQTETMBEGA1UECgwK
+QXBwbGUgSW5jLjETMBEGA1UECAwKQ2FsaWZvcm5pYTAeFw0yMDAzMTgxODMyNTNa
+Fw00NTAzMTUwMDAwMDBaMFIxJjAkBgNVBAMMHUFwcGxlIEFwcCBBdHRlc3RhdGlv
+biBSb290IENBMRMwEQYDVQQKDApBcHBsZSBJbmMuMRMwEQYDVQQIDApDYWxpZm9y
+bmlhMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAERTHhmLW07ATaFQIEVwTtT4dyctdh
+NbJhFs/Ii2FdCgAHGbpphY3+d8qjuDngIN3WVhQUBHAoMeQ/cLiP1sOUtgjqK9au
+Yen1mMEvRq9Sk3Jm5X8U62H+xTD3FE9TgS41o0IwQDAPBgNVHRMBAf8EBTADAQH/
+MB0GA1UdDgQWBBSskRBTM72+aEH/pwyp5frq5eWKoTAOBgNVHQ8BAf8EBAMCAQYw
+CgYIKoZIzj0EAwMDaAAwZQIwQgFGnByvsiVbpTKwSga0kP0e8EeDS4+sQmTvb7vn
+53O5+FRXgeLhpJ06ysC5PrOyAjEAp5U4xDgEgllF7En3VcE3iexZZtKeYnpqtijV
+oyFraWVIyd/dganmrduC1bmTBGwD
+-----END CERTIFICATE-----`;
 const GOOGLE_ROOTS = [
 	`-----BEGIN CERTIFICATE-----
 MIIFHDCCAwSgAwIBAgIJAPHBcqaZ6vUdMA0GCSqGSIb3DQEBCwUAMBsxGTAXBgNV
@@ -61,6 +82,7 @@ uR2zh/80lQyu9vAFCj6E4AXc+osmRg==
 ];
 
 let trustedRootKeys = null;
+let appleRootKey = null;
 let revocations = null;
 
 function generateChallenge() {
@@ -148,7 +170,7 @@ function refuse(reason) {
 	return false;
 }
 
-async function verifyAttestation({ certificates, publicKey, challenge }) {
+async function verifyAndroidAttestation({ certificates, publicKey, challenge }) {
 	if (!Array.isArray(certificates) || certificates.length < 2 || certificates.length > CHAIN_MAX_LENGTH || !certificates.every((entry) => { return typeof entry === 'string' && entry.length > 0 && entry.length <= CERTIFICATE_MAX_LENGTH; })) {
 		return refuse(`no usable certificate chain was sent (${Array.isArray(certificates) ? `${certificates.length} certificates` : typeof certificates}).`);
 	}
@@ -203,6 +225,76 @@ async function verifyAttestation({ certificates, publicKey, challenge }) {
 		console.error('Could not verify a biometric attestation:', error);
 		return false;
 	}
+}
+
+function sha256(...parts) {
+	return createHash('sha256').update(Buffer.concat(parts)).digest();
+}
+
+function appleRootKeyOf() {
+	if (!appleRootKey) {
+		appleRootKey = new X509Certificate(APPLE_ROOT).publicKey;
+	}
+	return appleRootKey;
+}
+
+function appleNonceOf(der) {
+	const extension = AsnParser.parse(der, Certificate).tbsCertificate.extensions?.find((entry) => { return entry.extnID === APP_ATTEST_NONCE_OID; });
+	return (extension ? Buffer.from(extension.extnValue.buffer) : Buffer.alloc(0));
+}
+
+async function verifyAppleAttestation({ attestation, publicKey, challenge }) {
+	if (typeof attestation !== 'string' || !attestation || attestation.length > ATTESTATION_MAX_LENGTH) {
+		return refuse(`no usable App Attest object was sent (${typeof attestation}).`);
+	}
+	try {
+		const decoded = decodeAttestationObject(Buffer.from(attestation, 'base64url'));
+		const statement = decoded.get('attStmt');
+		const authData = decoded.get('authData');
+		const ders = statement?.get('x5c');
+		if (decoded.get('fmt') !== APP_ATTEST_FORMAT || !authData || !Array.isArray(ders) || ders.length !== 2) {
+			return refuse(`the App Attest object is not usable (format ${decoded.get('fmt')}).`);
+		}
+		const [credential, intermediate] = ders.map((der) => { return new X509Certificate(Buffer.from(der)); });
+		if (!credential.verify(intermediate.publicKey) || !intermediate.verify(appleRootKeyOf())) {
+			return refuse('the certificate chain does not end at Apple.');
+		}
+
+		if (!parsePublicKey(publicKey)) {
+			return refuse('the public key is not a P-256 key.');
+		}
+		const nonce = sha256(authData, sha256(Buffer.from(challenge, 'utf8'), Buffer.from(publicKey, 'base64url')));
+		if (!Buffer.concat([APP_ATTEST_NONCE_PREFIX, nonce]).equals(appleNonceOf(Buffer.from(ders[0])))) {
+			return refuse('the attested challenge does not match.');
+		}
+
+		const { x, y } = credential.publicKey.export({ format: 'jwk' });
+		const keyId = sha256(Buffer.from([4]), Buffer.from(x, 'base64url'), Buffer.from(y, 'base64url'));
+		const data = parseAuthenticatorData(authData);
+		if (!Buffer.from(data.rpIdHash).equals(sha256(Buffer.from(APP_ID, 'utf8')))) {
+			return refuse('the key belongs to another app.');
+		}
+		if (data.counter !== 0) {
+			return refuse(`the App Attest key was used before (counter ${data.counter}).`);
+		}
+		if (!data.aaguid || !APP_ATTEST_ENVIRONMENTS.some((environment) => { return environment.equals(Buffer.from(data.aaguid)); })) {
+			return refuse('the App Attest environment is unknown.');
+		}
+		if (!data.credentialID || !keyId.equals(Buffer.from(data.credentialID))) {
+			return refuse('the attested key is not the key in its certificate.');
+		}
+		return true;
+	} catch (error) {
+		console.error('Could not verify an App Attest object:', error);
+		return false;
+	}
+}
+
+function verifyAttestation({ certificates, attestation, publicKey, challenge }) {
+	if (attestation !== undefined) {
+		return verifyAppleAttestation({ attestation, publicKey, challenge });
+	}
+	return verifyAndroidAttestation({ certificates, publicKey, challenge });
 }
 
 export {

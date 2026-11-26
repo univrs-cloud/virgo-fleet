@@ -28,6 +28,16 @@ router.get('/.well-known/assetlinks.json', (req, res) => {
 		}
 	}]);
 });
+router.get('/.well-known/apple-app-site-association', (req, res) => {
+	res.json({
+		applinks: {
+			details: [{
+				appIDs: ['96J2Q5Y3U3.cloud.univrs.fleet'],
+				components: [{ '/': '*' }]
+			}]
+		}
+	});
+});
 router.post('/auth/signup', authController.signup);
 router.post('/auth/login', authController.login);
 router.post('/auth/logout', authController.logout);

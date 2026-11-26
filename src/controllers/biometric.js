@@ -43,7 +43,8 @@ async function registerVerify(req, res) {
 			credentialId: req.body?.credentialId,
 			publicKey: req.body?.publicKey,
 			signature: req.body?.signature,
-			certificates: req.body?.certificates
+			certificates: req.body?.certificates,
+			attestation: req.body?.attestation
 		});
 		user.biometricEnabled = true;
 		refreshAccountCookie(res, req, session);
