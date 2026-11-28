@@ -18,6 +18,7 @@ const UNREGISTER_TIMEOUT_MS = 5000;
 // How often stale connectivity events (beyond the retention window) are swept.
 const CONNECTIVITY_PRUNE_INTERVAL_MS = 1000 * 60 * 60;
 const UPDATE_STAGES = new Set(['download', 'install']);
+const UPDATE_RECONNECT_MS = 1000 * 60 * 5;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 class NodeModule {
@@ -26,6 +27,7 @@ class NodeModule {
 	#nodeSocketsByNodeId = new Map();
 	#updatesByNodeId = new Map();
 	#updateByNodeId = new Map();
+	#updateReconnectTimersByNodeId = new Map();
 	#appUpdateJobsByNodeId = new Map();
 	#storageByNodeId = new Map();
 	#upsByNodeId = new Map();
@@ -253,6 +255,8 @@ class NodeModule {
 		this.#nsp.on('connection', (socket) => {
 			if (socket.data?.role === 'node' && socket.data?.nodeId && !socket.data?.transient) {
 				this.setNodeSocket(socket.data.nodeId, socket);
+				clearTimeout(this.#updateReconnectTimersByNodeId.get(socket.data.nodeId));
+				this.#updateReconnectTimersByNodeId.delete(socket.data.nodeId);
 				this.#handleNodePresence(socket.data.nodeId, true);
 				DomainService.reprobe(socket.data.nodeId, getSocketClientAddress(socket))
 					.catch((error) => { console.error(`[domains] reprobe failed for ${socket.data.nodeId}: ${error.message}`); });
@@ -349,7 +353,7 @@ class NodeModule {
 				if (this.#nodeSocketsByNodeId.get(nodeId) === socket) {
 					this.#nodeSocketsByNodeId.delete(nodeId);
 					this.#updatesByNodeId.delete(nodeId);
-					this.#updateByNodeId.delete(nodeId);
+					this.#holdRunningUpdate(nodeId);
 					this.#appUpdateJobsByNodeId.delete(nodeId);
 					this.#storageByNodeId.delete(nodeId);
 					this.#upsByNodeId.delete(nodeId);
@@ -363,6 +367,21 @@ class NodeModule {
 				}
 			});
 		});
+	}
+
+	#holdRunningUpdate(nodeId) {
+		clearTimeout(this.#updateReconnectTimersByNodeId.get(nodeId));
+		this.#updateReconnectTimersByNodeId.delete(nodeId);
+		if (this.#updateByNodeId.get(nodeId)?.state !== 'running') {
+			this.#updateByNodeId.delete(nodeId);
+			return;
+		}
+
+		this.#updateReconnectTimersByNodeId.set(nodeId, setTimeout(() => {
+			this.#updateReconnectTimersByNodeId.delete(nodeId);
+			this.#updateByNodeId.delete(nodeId);
+			this.#broadcastNodesUpdated(nodeId, 'Error broadcasting node update timeout:');
+		}, UPDATE_RECONNECT_MS));
 	}
 
 	/** What the node card draws from a UPS reading: the power source, whether it is charging, and the
